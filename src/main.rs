@@ -3,7 +3,7 @@ extern crate config;
 #[macro_use] extern crate clap;
 use clap::{Arg, App, AppSettings};
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::path::PathBuf;
 use std::collections::HashMap;
 
@@ -64,7 +64,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     None
 }
 
-fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String)> {
+fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String)> {
     let path_clone = path.clone();
     let path_str = path_clone.as_path()
         .to_str()
@@ -84,7 +84,7 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String)> {
             let dockerfile = command_entry.clone().get("dockerfile").unwrap()
                 .clone()
                 .into_str().unwrap();
-            let tpl = (image, dockerfile);
+            let tpl = (image, dockerfile, path_str.to_string());
 
             return Some(tpl);
         }else{
@@ -132,6 +132,44 @@ fn get_user() -> (String, String) {
     (uid, gid)
 }
 
+fn image_exists(image: &String) -> bool {
+    let status = Command::new("docker")
+        .arg("image")
+        .arg("inspect")
+        .arg(image)
+        .stdout(Stdio::null())
+        .status()
+        .expect("failed to execute process 'docker inspect IMAGE'");
+
+        status.success()
+}
+
+fn download_image(image: &String) -> bool {
+    println!("Downloading image: {}", image);
+    let status = Command::new("docker")
+        .arg("pull")
+        .arg(image)
+        .status()
+        .expect("failed to execute process 'docker pull IMAGE'");
+
+        status.success()
+}
+
+fn build_image(image: &String, dockerfile: &String, dockerfile_path: &String) -> bool {
+    println!("Building image: {}/{} -> {}", dockerfile_path, dockerfile, image);
+    let status = Command::new("docker")
+        .arg("build")
+        .arg("-t")
+        .arg(image)
+        .arg("-f")
+        .arg(dockerfile)
+        .arg(dockerfile_path)
+        .status()
+        .expect("failed to execute process 'docker pull IMAGE'");
+
+        status.success()
+}
+
 fn run_command(command: &str, args: Vec<&str>) {
     let current_path = std::env::current_dir().unwrap();
     let path_clone = current_path.clone();
@@ -140,7 +178,19 @@ fn run_command(command: &str, args: Vec<&str>) {
     let (uid, gid) = get_user();
     let uid_gid = format!("{}:{}", uid, gid);
 
-    if let Some((image, _dockerfile)) = load_config(path_clone, command) {
+    if let Some((image, dockerfile, dockerfile_path)) = load_config(path_clone, command) {
+
+        // Check if image exists locally
+        if ! image_exists(&image) {
+            // Try downloading it
+            if ! download_image(&image) {
+                // Otherwise, build it
+                if ! build_image(&image, &dockerfile, &dockerfile_path) {
+                    panic!("Unable to build docker image: {} with dockerfile: {}/{}", image, dockerfile_path, dockerfile);
+                }
+            }
+        }
+
         let mount = format!("type=bind,src={},dst=/workdir", current_dir);
         let mut docker_args = vec![
             "run",
