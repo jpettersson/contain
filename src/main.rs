@@ -27,10 +27,10 @@ fn main() {
             .arg(Arg::with_name("args")
                  .multiple(true))
             .get_matches();
-    
+
     if matches.is_present(COMMAND) {
         let command = matches.value_of(COMMAND).unwrap();
-        
+
         if matches.is_present(ARGS) {
             let args: Vec<&str> = matches.values_of(ARGS).unwrap().collect();
             run_command(command, args);
@@ -44,7 +44,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     if let Ok(array) = config.get_array("images") {
         for node in &array {
             let table = &node.clone().into_table().unwrap();
-            
+
             if let Ok(string) = table.get("commands").unwrap().clone().into_str() {
                 if string == command || string == "any" {
                     return Some(table.clone())
@@ -57,9 +57,9 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
                     }
                 }
             }
-        }    
+        }
     }
-    
+
     // No matching command was found in this document
     None
 }
@@ -69,13 +69,13 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String)> {
     let path_str = path_clone.as_path()
         .to_str()
         .unwrap();
-    
+
     let full_path = format!("{}/{}", path_str, CONTAIN_FILENAME);
     let mut pending_config = config::Config::default();
-    
+
     let result = pending_config
         .merge(config::File::with_name(&full_path));
-    
+
     if let Ok(ref config) = result {
         if let Some(command_entry) = get_config_table(config, command) {
             let image = command_entry.get("image").unwrap()
@@ -139,23 +139,23 @@ fn run_command(command: &str, args: Vec<&str>) {
 
     let (uid, gid) = get_user();
     let uid_gid = format!("{}:{}", uid, gid);
-    
+
     if let Some((image, _dockerfile)) = load_config(path_clone, command) {
         let mount = format!("type=bind,src={},dst=/workdir", current_dir);
         let mut docker_args = vec![
             "run",
             "-u",
-            uid_gid.as_str(), 
-            "--rm", 
-            "--mount", 
-            &mount, 
-            &image, 
+            uid_gid.as_str(),
+            "--rm",
+            "--mount",
+            &mount,
+            &image,
             command];
 
         docker_args.extend(args);
         println!("docker {:?}", docker_args);
-        
-        execute(Command::new("docker").args(docker_args));        
+
+        execute(Command::new("docker").args(docker_args));
     }else{
         panic!("No docker image found for '{}' in .contain.yaml or any path above!", command);
     }
