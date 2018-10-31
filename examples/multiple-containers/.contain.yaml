@@ -1,0 +1,10 @@
+images:
+  - image: "gcr.io/styra-infra/mvn:latest"
+    dockerfile: Dockerfile.mvn
+    commands: mvn
+
+  - image: "gcr.io/styra-infra/yarn:latest"
+    dockerfile: Dockerfile.yarn
+    commands:
+      - yarn
+      - any
