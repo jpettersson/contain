@@ -11,7 +11,29 @@ const COMMAND: &str = "command";
 const ARGS: &str = "args";
 const CONTAIN_FILENAME: &str = ".contain.yaml";
 
+#[derive(Debug)]
+struct GlobalOptions {
+    persist_image: bool,
+    keep_container: bool
+}
+
+impl GlobalOptions {
+    fn persist_image(&mut self, a: bool) {
+        self.persist_image = a;
+    }
+
+    fn keep_container(&mut self, a: bool) {
+        self.keep_container = a;
+    }
+}
+
 fn main() {
+
+    let mut options = GlobalOptions {
+        persist_image: false,
+        keep_container: false
+    };
+
     let matches = App::new("contain")
         .setting(AppSettings::TrailingVarArg)
         .setting(AppSettings::AllowLeadingHyphen)
@@ -30,12 +52,29 @@ fn main() {
 
     if matches.is_present(COMMAND) {
         let command = matches.value_of(COMMAND).unwrap();
-
         if matches.is_present(ARGS) {
             let args: Vec<&str> = matches.values_of(ARGS).unwrap().collect();
-            run_command(command, args);
+            let mut program_flag_found = false;
+
+            if command.as_bytes()[0] == b'-' {
+                program_flag_found = true;
+                match command {
+                    "-p" => options.persist_image(true),
+                    "-k" => options.keep_container(true),
+                    _ => panic!("Unsupported contain flag {}", command)
+                }
+            }
+
+            if program_flag_found {
+                println!("Flags: {:?}", options);
+                let mut mut_args = args.clone();
+                run_command(args[0], mut_args.drain(1..).collect(), options);
+            }else{
+                run_command(command, args, options);
+            }
+
         }else{
-            run_command(command, vec![]);
+            run_command(command, vec![], options);
         }
     }
 }
@@ -170,7 +209,7 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &String) ->
         status.success()
 }
 
-fn run_command(command: &str, args: Vec<&str>) {
+fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) {
     let current_path = std::env::current_dir().unwrap();
     let path_clone = current_path.clone();
     let current_dir = current_path.as_path().to_str().unwrap();
@@ -192,15 +231,21 @@ fn run_command(command: &str, args: Vec<&str>) {
         }
 
         let mount = format!("type=bind,src={},dst=/workdir", current_dir);
-        let mut docker_args = vec![
+
+        let mut docker_args :Vec<&str> = vec![
             "run",
             "-u",
-            uid_gid.as_str(),
-            "--rm",
-            "--mount",
-            &mount,
-            &image,
-            command];
+            uid_gid.as_str()
+        ];
+
+        if ! options.keep_container { 
+            docker_args.push("--rm");
+        };
+
+        docker_args.push("--mount");
+        docker_args.push(&mount);
+        docker_args.push(&image);
+        docker_args.push(command);
 
         docker_args.extend(args);
         println!("docker {:?}", docker_args);
