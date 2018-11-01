@@ -1,11 +1,14 @@
 extern crate config;
+extern crate colored;
 
 #[macro_use] extern crate clap;
-use clap::{Arg, App, AppSettings};
 
 use std::process::{Command, Stdio};
 use std::path::PathBuf;
 use std::collections::HashMap;
+
+use clap::{Arg, App, AppSettings};
+use colored::*;
 
 const COMMAND: &str = "command";
 const ARGS: &str = "args";
@@ -61,7 +64,7 @@ fn main() {
                 match command {
                     "-p" => options.persist_image(true),
                     "-k" => options.keep_container(true),
-                    _ => panic!("Unsupported contain flag {}", command)
+                    _ => panic!("{}", format!("Unsupported contain flag {}", command).red())
                 }
             }
 

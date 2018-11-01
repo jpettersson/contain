@@ -6,3 +6,4 @@ authors = ["Jonathan Pettersson <jonathan.anders.pettersson@gmail.com>"]
 [dependencies]
 clap = "2.31.2"
 config = "0.9.1"
+colored = "1.6"
