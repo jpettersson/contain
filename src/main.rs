@@ -3,12 +3,29 @@ extern crate colored;
 
 #[macro_use] extern crate clap;
 
+#[macro_use]
+extern crate quick_error;
+
 use std::process::{Command, Stdio};
 use std::path::PathBuf;
 use std::collections::HashMap;
 
 use clap::{Arg, App, AppSettings};
 use colored::*;
+
+quick_error! {
+    #[derive(Debug)]
+    pub enum Error {
+        DockerError(descr: ColoredString) {
+            description(descr)
+            display("Error: {}", descr)
+        }
+        UnsupportedParameters(descr: ColoredString) {
+            description(descr)
+            display("Error: {}", descr)
+        }
+    }
+}
 
 const COMMAND: &str = "command";
 const ARGS: &str = "args";
@@ -31,6 +48,13 @@ impl GlobalOptions {
 }
 
 fn main() {
+    if let Err(err) = run() {
+        eprintln!("{}", err);
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<bool, Error> {
 
     let mut options = GlobalOptions {
         persist_image: false,
@@ -64,21 +88,25 @@ fn main() {
                 match command {
                     "-p" => options.persist_image(true),
                     "-k" => options.keep_container(true),
-                    _ => panic!("{}", format!("Unsupported contain flag {}", command).red())
+                    _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
                 }
             }
 
             if program_flag_found {
-                println!("Flags: {:?}", options);
                 let mut mut_args = args.clone();
-                run_command(args[0], mut_args.drain(1..).collect(), options);
+                return run_command(args[0], mut_args.drain(1..).collect(), options);
             }else{
-                run_command(command, args, options);
+                return run_command(command, args, options);
             }
 
         }else{
-            run_command(command, vec![], options);
+            return run_command(command, vec![], options);
         }
+    }else{
+        // This always happens because clap-rs triggers help if no command is passed.. 
+        // TODO: Get rid of this else branch.
+        
+        return Ok(true);
     }
 }
 
@@ -102,7 +130,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
         }
     }
 
-    // No matching command was found in this document
+    // No matching command was found in this YAML document
     None
 }
 
@@ -130,7 +158,6 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
 
             return Some(tpl);
         }else{
-            println!("else");
             path.pop();
             return load_config(path, command);
         }
@@ -212,7 +239,7 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &String) ->
         status.success()
 }
 
-fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) {
+fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result<bool, Error> {
     let current_path = std::env::current_dir().unwrap();
     let path_clone = current_path.clone();
     let current_dir = current_path.as_path().to_str().unwrap();
@@ -255,7 +282,8 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) {
 
         execute(Command::new("docker").args(docker_args));
     }else{
-        panic!("No docker image found for '{}' in .contain.yaml or any path above!", command);
+        return Err(Error::DockerError(format!("No docker image found for '{}' in .contain.yaml or any path above!", command).red()));
     }
 
+    return Ok(true);
 }
