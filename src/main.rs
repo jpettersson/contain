@@ -34,7 +34,8 @@ const CONTAIN_FILENAME: &str = ".contain.yaml";
 #[derive(Debug)]
 struct GlobalOptions {
     persist_image: bool,
-    keep_container: bool
+    keep_container: bool,
+    dry_run: bool
 }
 
 impl GlobalOptions {
@@ -44,6 +45,10 @@ impl GlobalOptions {
 
     fn keep_container(&mut self, a: bool) {
         self.keep_container = a;
+    }
+
+    fn dry_run(&mut self, a: bool) {
+        self.dry_run = a;
     }
 }
 
@@ -58,7 +63,8 @@ fn run() -> Result<bool, Error> {
 
     let mut options = GlobalOptions {
         persist_image: false,
-        keep_container: false
+        keep_container: false,
+        dry_run: false
     };
 
     let matches = App::new("contain")
@@ -81,20 +87,23 @@ fn run() -> Result<bool, Error> {
         let command = matches.value_of(COMMAND).unwrap();
         if matches.is_present(ARGS) {
             let args: Vec<&str> = matches.values_of(ARGS).unwrap().collect();
-            let mut program_flag_found = false;
+            let mut num_program_flags = 0;
 
-            if command.as_bytes()[0] == b'-' {
-                program_flag_found = true;
-                match command {
+            let mut flag = command;
+            while flag.as_bytes()[0] == b'-' {
+                match flag {
                     "-p" => options.persist_image(true),
                     "-k" => options.keep_container(true),
+                    "--dry" => options.dry_run(true),
                     _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
                 }
+                num_program_flags += 1;
+                flag = args[num_program_flags-1];
             }
 
-            if program_flag_found {
+            if num_program_flags > 0 {
                 let mut mut_args = args.clone();
-                return run_command(args[0], mut_args.drain(1..).collect(), options);
+                return run_command(args[num_program_flags-1], mut_args.drain(num_program_flags..).collect(), options);
             }else{
                 return run_command(command, args, options);
             }
@@ -172,12 +181,6 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
     };
 }
 
-fn execute(cmd: &mut Command) {
-    if let Err(err) = cmd.spawn().expect("Could not run the command").wait() {
-        println!("{:?}", err);
-    }
-}
-
 fn get_user() -> (String, String) {
     let uid_output = Command::new("id")
                      .arg("-u")
@@ -247,6 +250,8 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
     let (uid, gid) = get_user();
     let uid_gid = format!("{}:{}", uid, gid);
 
+    println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
+        
     if let Some((image, dockerfile, dockerfile_path)) = load_config(path_clone, command) {
 
         // Check if image exists locally
@@ -260,6 +265,8 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
             }
         }
 
+        println!("{} {}", format!("(using image)  ").blue().bold(), image);
+
         let mount = format!("type=bind,src={},dst=/workdir", current_dir);
 
         let mut docker_args :Vec<&str> = vec![
@@ -268,7 +275,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
             uid_gid.as_str()
         ];
 
-        if ! options.keep_container { 
+        if ! options.keep_container {
             docker_args.push("--rm");
         };
 
@@ -278,9 +285,24 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
         docker_args.push(command);
 
         docker_args.extend(args);
-        println!("docker {:?}", docker_args);
 
-        execute(Command::new("docker").args(docker_args));
+
+        if ! options.dry_run {
+            println!("{} docker {}", "(executing)    ".bright_blue().bold(), docker_args.join(" "));
+            match Command::new("docker").args(docker_args).spawn().expect("Could not run the command").wait() {
+                Ok(_result) => {
+                    if options.keep_container {
+                        println!("{} {}", format!("(kept container)  ").green().bold(), "CONTAINER_ID");
+                    }
+                    if options.persist_image {
+                        println!("{} {}", format!("(persisted changes to)  ").green().bold(), "IMAGE_ID");    
+                    }
+                },
+                Err(err) => println!("{:?}", err)
+            }
+        } else {
+            println!("{} docker {}", "(dry run)      ".yellow().bold(), docker_args.join(" "));
+        }
     }else{
         return Err(Error::DockerError(format!("No docker image found for '{}' in .contain.yaml or any path above!", command).red()));
     }
