@@ -1,6 +1,6 @@
 use std::process::Command;
 use std::fs::{canonicalize};
-use std::path::PathBuf;
+// use std::path::PathBuf;
 
 static WITHOUT_ARGS_OUTPUT: &'static str = "contain 0.1.0
 Jonathan Pettersson
@@ -68,8 +68,7 @@ mod integration {
     #[test]
     fn calling_command_in_path_without_config_yields_error() {
         let output = Command::new(canonicalize("./target/debug/contain").unwrap())
-            .arg("ls")
-            .current_dir(canonicalize("./tests/fixtures/missing_contain_yaml").unwrap())
+            .arg("ls") // Will run in current project root which does not have a .contain.yaml file
             .output()
             .expect("failed to execute process");
 
