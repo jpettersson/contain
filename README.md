@@ -15,5 +15,25 @@ Use docker for project local development environments, but pass through commands
   * Mount local directory
   * Delete after execution
 
-### Rough edges
-* Ensure users are the same in host system and containers to avoid file permission issues
+### Features & todo:
+* Write README & project examples
+* Decide MVP scope
+* -p flag: Implement logic for persisting images from running containers (to allow dependencies to be installed in images, etc)
+* Display IP address of docker container for long running commands (web servers, etc)
+* Detect & use docker-machine when needed
+* Ensure containers shut down on termination signals
+* Ensure that interactive scripts work (issue with lein repl quitting immidiately)
+* Helper methods for building docker images?
+* Get rid of all `.unwrap()` calls
+
+Configuration (.contain.yaml)
+* Support extra mountpoints? 
+  - Solve the issue with global repos (~/.lein ~/.m2 etc) and let them live in the project root directory instead
+* Support ENV variables
+
+### Testing todo:
+* Ensure required environment variables are readable
+* Ensure -p and -k flags work as expected
+* Ensure the run, pull build strategy works
+* Test important permutations of the config file format
+* Test config file validation
