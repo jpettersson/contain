@@ -33,6 +33,7 @@ const CONTAIN_FILENAME: &str = ".contain.yaml";
 
 #[derive(Debug)]
 struct GlobalOptions {
+    interactive: bool,
     persist_image: bool,
     keep_container: bool,
     dry_run: bool
@@ -50,6 +51,10 @@ impl GlobalOptions {
     fn dry_run(&mut self, a: bool) {
         self.dry_run = a;
     }
+
+    fn interactive(&mut self, a: bool) {
+        self.interactive = a;
+    }
 }
 
 fn main() {
@@ -62,6 +67,7 @@ fn main() {
 fn run() -> Result<bool, Error> {
 
     let mut options = GlobalOptions {
+        interactive: false,
         persist_image: false,
         keep_container: false,
         dry_run: false
@@ -94,6 +100,7 @@ fn run() -> Result<bool, Error> {
                 match flag {
                     "-p" => options.persist_image(true),
                     "-k" => options.keep_container(true),
+                    "-i" => options.interactive(true),
                     "--dry" => options.dry_run(true),
                     _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
                 }
@@ -143,7 +150,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     None
 }
 
-fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String)> {
+fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>)> {
     let path_clone = path.clone();
     let path_str = path_clone.as_path()
         .to_str()
@@ -163,7 +170,19 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
             let dockerfile = command_entry.clone().get("dockerfile").unwrap()
                 .clone()
                 .into_str().unwrap();
-            let tpl = (image, dockerfile, path_str.to_string());
+            
+            let mut env_variables: Vec<String> = Vec::new();
+            if let Some(node) = command_entry.get("env") {
+                let node_clone = node.clone();
+                if let Ok(vec) = node_clone.into_array() {
+                    let vec_string : Vec<String> = vec.into_iter().map(|value| value.into_str().unwrap()).collect();
+
+                    env_variables = vec_string;
+                    // println!("{:?}", vec_string);
+                }
+            }
+
+            let tpl = (image, dockerfile, path_str.to_string(), env_variables);
 
             return Some(tpl);
         }else{
@@ -249,10 +268,12 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
 
     let (uid, gid) = get_user();
     let uid_gid = format!("{}:{}", uid, gid);
-
+    
+    let mut env_str: String = "".to_owned();
+        
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
         
-    if let Some((image, dockerfile, dockerfile_path)) = load_config(path_clone, command) {
+    if let Some((image, dockerfile, dockerfile_path, env_variables)) = load_config(path_clone, command) {
 
         // Check if image exists locally
         if ! image_exists(&image) {
@@ -279,11 +300,32 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
             docker_args.push("--rm");
         };
 
+        if options.interactive {
+            docker_args.push("-it");
+        };
+
+
+        if env_variables.len() > 0 {
+            let env_string: String = env_variables
+                                .into_iter()
+                                .map(|s| format!("-e \"{}\"", s))
+                                .collect();
+            
+            env_str.push_str(env_string.clone().as_str());
+            docker_args.push(env_str.as_str());
+        }
+        
+
+        // Mount workspace 
+        // TODO: Support additional volumes
         docker_args.push("--mount");
         docker_args.push(&mount);
         docker_args.push(&image);
+        
+        // Binary to execute inside container
         docker_args.push(command);
 
+        // Arguments to pass to binary inside container
         docker_args.extend(args);
 
 
