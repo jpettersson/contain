@@ -17,11 +17,9 @@ ARGS:
     <args>...    
 ";
  
-static LS_IN_EXAMPLES_MULTIPLE_CONTAINERS: &'static str = "docker [\"run\", \"-u\", \"501:20\", \"--rm\", \"--mount\", \"type=bind,src=/Users/jpettersson/code/github.com/jpettersson/contain/examples/multiple-containers,dst=/workdir\", \"gcr.io/styra-infra/yarn:latest\", \"ls\"]
+static LS_IN_EXAMPLES_MULTIPLE_CONTAINERS: &'static str = "
 Dockerfile.mvn
 Dockerfile.yarn
-node_modules
-yarn.lock
 ";
 
 static ERROR_NO_CONFIG_FILE_FOUND: &'static str = "Error: \u{1b}[31mNo docker image found for 'ls' in .contain.yaml or any path above!\u{1b}[0m
@@ -34,6 +32,27 @@ mod integration {
     use WITHOUT_ARGS_OUTPUT;
     use LS_IN_EXAMPLES_MULTIPLE_CONTAINERS;
     use ERROR_NO_CONFIG_FILE_FOUND;
+
+    pub trait ReversableSubString { 
+        fn take_from_end(self, len: usize) -> Self;
+    }
+
+    impl ReversableSubString for String {
+        fn take_from_end(self, len: usize) -> String {
+            let output_sub_rev : String = self
+                                        .chars()
+                                        .rev()
+                                        .take(len)
+                                        .collect();
+
+            let output_sub : String = output_sub_rev
+                                        .chars()
+                                        .rev()
+                                        .collect();
+
+            return output_sub;
+        }
+    }
 
     #[test]
     fn docker_is_available() {
@@ -54,6 +73,8 @@ mod integration {
         assert_eq!(String::from_utf8_lossy(&output.stderr), WITHOUT_ARGS_OUTPUT);
     }
 
+    // Test if it's possible to execute a simple command through a docker container
+
     #[test]
     fn calling_command_through_docker_works() {
         let output = Command::new(canonicalize("./target/debug/contain").unwrap())
@@ -62,7 +83,12 @@ mod integration {
             .output()
             .expect("failed to execute process");
 
-        assert_eq!(String::from_utf8_lossy(&output.stdout), LS_IN_EXAMPLES_MULTIPLE_CONTAINERS);
+        let output_str = String::from_utf8_lossy(&output.stdout).to_string();
+
+        // Only compare the last part of the output as there are variables that changes between systems in the CLI output
+        let output_sub = output_str.take_from_end(LS_IN_EXAMPLES_MULTIPLE_CONTAINERS.len());
+
+        assert_eq!(output_sub, LS_IN_EXAMPLES_MULTIPLE_CONTAINERS);
     }
     
     #[test]
