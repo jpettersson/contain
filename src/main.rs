@@ -157,7 +157,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     None
 }
 
-fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>)> {
+fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>, Vec<String>)> {
     let path_clone = path.clone();
     let path_str = path_clone.as_path()
         .to_str()
@@ -182,14 +182,33 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
             if let Some(node) = command_entry.get("env") {
                 let node_clone = node.clone();
                 if let Ok(vec) = node_clone.into_array() {
-                    let vec_string : Vec<String> = vec.into_iter().map(|value| value.into_str().unwrap()).collect();
+                    let vec_string : Vec<String> = vec.into_iter()
+                                                            .map(|value| value.into_str().unwrap())
+                                                            .collect();
 
                     env_variables = vec_string;
                     // println!("{:?}", vec_string);
                 }
             }
 
-            let tpl = (image, dockerfile, path_str.to_string(), env_variables);
+            let mut extra_mounts: Vec<String> = Vec::new();
+            if let Some(node) = command_entry.get("mounts") {
+                let node_clone = node.clone();
+                if let Ok(vec) = node_clone.into_array() {
+                    for i in 0..vec.len() {
+                        let item = &vec[i];
+                        if let Ok(obj) = item.clone().into_table() {
+                            let mount_type = obj.get("type").unwrap();
+                            let src = obj.get("src").unwrap();
+                            let dst = obj.get("dst").unwrap();
+
+                            extra_mounts.push(format!("type={},src={},dst={}", mount_type, src, dst));
+                        }
+                    }
+                }
+            }
+
+            let tpl = (image, dockerfile, path_str.to_string(), env_variables, extra_mounts);
 
             return Some(tpl);
         }else{
@@ -277,10 +296,10 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
     let uid_gid = format!("{}:{}", uid, gid);
     
     let mut env_str: String = "".to_owned();
-        
+   
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
         
-    if let Some((image, dockerfile, dockerfile_path, env_variables)) = load_config(path_clone, command) {
+    if let Some((image, dockerfile, dockerfile_path, env_variables, extra_mounts)) = load_config(path_clone, command) {
 
         // Check if image exists locally
         if ! image_exists(&image) {
@@ -330,6 +349,18 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
         // TODO: Support additional volumes
         docker_args.push("--mount");
         docker_args.push(&mount);
+
+        if extra_mounts.len() > 0 {
+            for i in 0..extra_mounts.len() {
+                let item = &extra_mounts[i];
+                docker_args.push("--mount");
+                docker_args.push(item);
+            }
+
+            // extra_mounts_str.push_str(extra_mounts_string.clone().as_str());
+            // docker_args.push(extra_mounts_str.as_str());
+        }
+
         docker_args.push(&image);
         
         // Binary to execute inside container
