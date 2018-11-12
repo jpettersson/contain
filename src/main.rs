@@ -36,6 +36,7 @@ struct GlobalOptions {
     interactive: bool,
     persist_image: bool,
     keep_container: bool,
+    run_as_root: bool,
     dry_run: bool
 }
 
@@ -55,6 +56,10 @@ impl GlobalOptions {
     fn interactive(&mut self, a: bool) {
         self.interactive = a;
     }
+
+    fn run_as_root(&mut self, a: bool) {
+        self.run_as_root = a;
+    }
 }
 
 fn main() {
@@ -70,7 +75,8 @@ fn run() -> Result<bool, Error> {
         interactive: false,
         persist_image: false,
         keep_container: false,
-        dry_run: false
+        dry_run: false,
+        run_as_root: false
     };
 
     let matches = App::new("contain")
@@ -102,6 +108,7 @@ fn run() -> Result<bool, Error> {
                     "-k" => options.keep_container(true),
                     "-i" => options.interactive(true),
                     "--dry" => options.dry_run(true),
+                    "--root" => options.run_as_root(true),
                     _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
                 }
                 num_program_flags += 1;
@@ -291,10 +298,13 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
         let mount = format!("type=bind,src={},dst=/workdir", current_dir);
 
         let mut docker_args :Vec<&str> = vec![
-            "run",
-            "-u",
-            uid_gid.as_str()
+            "run"
         ];
+
+        if ! options.run_as_root {
+            docker_args.push("-u");
+            docker_args.push(uid_gid.as_str());
+        }
 
         if ! options.keep_container {
             docker_args.push("--rm");
