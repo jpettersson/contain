@@ -157,7 +157,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     None
 }
 
-fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>, Vec<String>)> {
+fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>, Vec<String>, Vec<String>)> {
     let path_clone = path.clone();
     let path_str = path_clone.as_path()
         .to_str()
@@ -213,7 +213,18 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
                 }
             }
 
-            let tpl = (image, dockerfile, path_str.to_string(), env_variables, extra_mounts);
+            let mut flags: Vec<String> = Vec::new();
+            if let Some(node) = command_entry.get("flags") {
+                let node_clone = node.clone();
+                if let Ok(vec) = node_clone.into_array() {
+                    for i in 0..vec.len() {
+                        let item = &vec[i];
+                        flags.push(item.to_string());
+                    }
+                }
+            }
+
+            let tpl = (image, dockerfile, path_str.to_string(), flags, env_variables, extra_mounts);
 
             return Some(tpl);
         }else{
@@ -303,8 +314,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
     let mut env_str: String = "".to_owned();
    
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
-        
-    if let Some((image, dockerfile, dockerfile_path, env_variables, extra_mounts)) = load_config(path_clone, command) {
+    if let Some((image, dockerfile, dockerfile_path, flags, env_variables, extra_mounts)) = load_config(path_clone, command) {
 
         // Check if image exists locally
         if ! image_exists(&image) {
@@ -325,16 +335,16 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
             "run"
         ];
 
-        if ! options.run_as_root {
+        if ! options.run_as_root && ! flags.contains(&"root".to_string()) {
             docker_args.push("-u");
             docker_args.push(uid_gid.as_str());
         }
 
-        if ! options.keep_container {
+        if ! options.keep_container && ! flags.contains(&"k".to_string()) {
             docker_args.push("--rm");
         };
 
-        if options.interactive {
+        if options.interactive || flags.contains(&"i".to_string()) {
             docker_args.push("-it");
         };
 
