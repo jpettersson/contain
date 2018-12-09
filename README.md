@@ -25,6 +25,8 @@ Use docker for project local development environments, but pass through commands
 * Ensure that interactive scripts work (issue with lein repl quitting immidiately)
 * Helper methods for building docker images?
 * Get rid of all `.unwrap()` calls
+* Support IDE plugins using docker exec (background processes)
+  * Start a container in the background and execute rustc, leiningen, etc inside it.
 
 Configuration (.contain.yaml)
 * Support extra mountpoints? 
