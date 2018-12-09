@@ -202,7 +202,12 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
                             let src = obj.get("src").unwrap();
                             let dst = obj.get("dst").unwrap();
 
-                            extra_mounts.push(format!("type={},src={},dst={}", mount_type, src, dst));
+                            let extra_options = match obj.get("options") {
+                                Some(s) => format!(",{}", s.to_string()),
+                                None => "".to_string()
+                            };
+
+                            extra_mounts.push(format!("type={},src={},dst={}{}", mount_type, src, dst, extra_options));
                         }
                     }
                 }
