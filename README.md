@@ -33,6 +33,10 @@ Configuration (.contain.yaml)
   - Solve the issue with global repos (~/.lein ~/.m2 etc) and let them live in the project root directory instead
 * Support ENV variables
 
+Scaffolding Dockerfiles
+* Specify template Dockerfiles in ~/.contain.yaml
+* Include defaults in the documentation
+
 ### Testing todo:
 * Ensure required environment variables are readable
 * Ensure -p and -k flags work as expected
