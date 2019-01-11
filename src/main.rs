@@ -157,7 +157,7 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     None
 }
 
-fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>, Vec<String>, Vec<String>)> {
+fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, String, Vec<String>, Vec<String>, Vec<String>, Vec<String>)> {
     let path_clone = path.clone();
     let path_str = path_clone.as_path()
         .to_str()
@@ -213,6 +213,17 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
                 }
             }
 
+            let mut ports: Vec<String> = Vec::new();
+            if let Some(node) = command_entry.get("ports") {
+                let node_clone = node.clone();
+                if let Ok(vec) = node_clone.into_array() {
+                    for i in 0..vec.len() {
+                        let item = &vec[i];
+                        ports.push(item.to_string());
+                    }
+                }
+            }
+
             let mut flags: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("flags") {
                 let node_clone = node.clone();
@@ -224,7 +235,7 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
                 }
             }
 
-            let tpl = (image, dockerfile, path_str.to_string(), flags, env_variables, extra_mounts);
+            let tpl = (image, dockerfile, path_str.to_string(), flags, env_variables, extra_mounts, ports);
 
             return Some(tpl);
         }else{
@@ -314,7 +325,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
     let mut env_str: String = "".to_owned();
    
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
-    if let Some((image, dockerfile, dockerfile_path, flags, env_variables, extra_mounts)) = load_config(path_clone, command) {
+    if let Some((image, dockerfile, dockerfile_path, flags, env_variables, extra_mounts, ports)) = load_config(path_clone, command) {
 
         // Check if image exists locally
         if ! image_exists(&image) {
@@ -361,7 +372,6 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
         
 
         // Mount workspace 
-        // TODO: Support additional volumes
         docker_args.push("--mount");
         docker_args.push(&mount);
 
@@ -371,9 +381,14 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
                 docker_args.push("--mount");
                 docker_args.push(item);
             }
+        }
 
-            // extra_mounts_str.push_str(extra_mounts_string.clone().as_str());
-            // docker_args.push(extra_mounts_str.as_str());
+        if ports.len() > 0 {
+            for i in 0..ports.len() {
+                let item = &ports[i];
+                docker_args.push("-p");
+                docker_args.push(item);
+            }
         }
 
         docker_args.push(&image);
