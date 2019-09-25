@@ -126,9 +126,9 @@ fn run() -> Result<bool, Error> {
             return run_command(command, vec![], options);
         }
     }else{
-        // This always happens because clap-rs triggers help if no command is passed.. 
+        // This always happens because clap-rs triggers help if no command is passed..
         // TODO: Get rid of this else branch.
-        
+
         return Ok(true);
     }
 }
@@ -177,7 +177,7 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<(String, String, Stri
             let dockerfile = command_entry.clone().get("dockerfile").unwrap()
                 .clone()
                 .into_str().unwrap();
-            
+
             let mut env_variables: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("env") {
                 let node_clone = node.clone();
@@ -321,9 +321,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
 
     let (uid, gid) = get_user();
     let uid_gid = format!("{}:{}", uid, gid);
-    
-    let mut env_str: String = "".to_owned();
-   
+
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
     if let Some((image, dockerfile, dockerfile_path, flags, env_variables, extra_mounts, ports)) = load_config(path_clone, command) {
 
@@ -361,17 +359,15 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
 
 
         if env_variables.len() > 0 {
-            let env_string: String = env_variables
-                                .into_iter()
-                                .map(|s| format!("-e \"{}\"", s))
-                                .collect();
-            
-            env_str.push_str(env_string.clone().as_str());
-            docker_args.push(env_str.as_str());
+            for i in 0..env_variables.len() {
+                let item = &env_variables[i];
+                docker_args.push("-e");
+                docker_args.push(item.trim());
+            }
         }
-        
 
-        // Mount workspace 
+
+        // Mount workspace
         docker_args.push("--mount");
         docker_args.push(&mount);
 
@@ -392,7 +388,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
         }
 
         docker_args.push(&image);
-        
+
         // Binary to execute inside container
         docker_args.push(command);
 
@@ -408,7 +404,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
                         println!("{} {}", format!("(kept container)  ").green().bold(), "CONTAINER_ID");
                     }
                     if options.persist_image {
-                        println!("{} {}", format!("(persisted changes to)  ").green().bold(), "IMAGE_ID");    
+                        println!("{} {}", format!("(persisted changes to)  ").green().bold(), "IMAGE_ID");
                     }
                 },
                 Err(err) => println!("{:?}", err)
