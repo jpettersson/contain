@@ -1,6 +1,6 @@
 ## Automatic containerized development environments
 
-Use docker for project local development environments, but pass through commands as if your tools were installed globally.
+Use docker for project local development environments, but pass through commands as if your tools were installed globally. Contain is a tool that lets you write a form of structured documentation for your development environment. Using this structured documentation the tool then generates the correct docker command with env variables, mounts, flags, etc.
 
 ### Examples
 `contain yarn ...`
@@ -29,7 +29,7 @@ Use docker for project local development environments, but pass through commands
   * Start a container in the background and execute rustc, leiningen, etc inside it.
 
 Configuration (.contain.yaml)
-* Support extra mountpoints? 
+* Support extra mountpoints?
   - Solve the issue with global repos (~/.lein ~/.m2 etc) and let them live in the project root directory instead
 * Support ENV variables
 
