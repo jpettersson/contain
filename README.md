@@ -29,9 +29,7 @@ Use docker for project local development environments, but pass through commands
   * Start a container in the background and execute rustc, leiningen, etc inside it.
 
 Configuration (.contain.yaml)
-* Support extra mountpoints?
-  - Solve the issue with global repos (~/.lein ~/.m2 etc) and let them live in the project root directory instead
-* Support ENV variables
+* Support ENV variables in entire .contain.yaml file
 
 Scaffolding Dockerfiles
 * Specify template Dockerfiles in ~/.contain.yaml
