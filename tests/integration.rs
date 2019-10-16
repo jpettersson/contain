@@ -4,7 +4,7 @@ use std::fs::{canonicalize};
 
 static WITHOUT_ARGS_OUTPUT: &'static str = "contain 0.1.0
 Jonathan Pettersson
-Runs your development tool inside a container
+Runs your development tools inside containers
 
 USAGE:
     contain <command> [args]...
