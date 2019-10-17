@@ -41,7 +41,8 @@ struct GlobalOptions {
     keep_container: bool,
     run_as_root: bool,
     dry_run: bool,
-    skip_ports: bool
+    skip_ports: bool,
+    skip_name: bool
 }
 
 impl GlobalOptions {
@@ -67,6 +68,10 @@ impl GlobalOptions {
 
     fn skip_ports(&mut self, a: bool) {
         self.skip_ports = a;
+    }
+
+    fn skip_name(&mut self, a: bool) {
+        self.skip_name = a;
     }
 }
 
@@ -97,7 +102,8 @@ fn run() -> Result<bool, Error> {
         keep_container: false,
         dry_run: false,
         run_as_root: false,
-        skip_ports: false
+        skip_ports: false,
+        skip_name: false
     };
 
     let matches = App::new("contain")
@@ -131,6 +137,7 @@ fn run() -> Result<bool, Error> {
                     "--dry" => options.dry_run(true),
                     "--root" => options.run_as_root(true),
                     "--skip-ports" => options.skip_ports(true),
+                    "--skip-name" => options.skip_name(true),
                     _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
                 }
                 num_program_flags += 1;
@@ -433,9 +440,11 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
     let name;
 
     if let Some(n) = c.name {
-        name = n;
-        docker_args.push("--name");
-        docker_args.push(name.as_str());
+        if ! options.skip_name {
+            name = n;
+            docker_args.push("--name");
+            docker_args.push(name.as_str());
+        }
     };
 
     if ! options.run_as_root && ! c.flags.contains(&"root".to_string()) {
