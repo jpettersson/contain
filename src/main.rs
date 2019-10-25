@@ -80,7 +80,7 @@ struct Configuration {
     image: String,
     name: Option<String>,
     dockerfile: String,
-    path: String,
+    root_path: PathBuf,
     flags: Vec<String>,
     env_variables: Vec<String>,
     extra_mounts: Vec<String>,
@@ -280,7 +280,7 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                 image: image,
                 name: name,
                 dockerfile: dockerfile,
-                path: path_str.to_string(),
+                root_path: path,
                 flags: flags,
                 env_variables: env_variables,
                 extra_mounts: extra_mounts,
@@ -346,8 +346,10 @@ fn container_exists(name: &String) -> bool {
     return &output == name;
 }
 
-fn build_image(image: &String, dockerfile: &String, dockerfile_path: &String) -> bool {
-    println!("Building image: {}/{} -> {}", dockerfile_path, dockerfile, image);
+fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf) -> bool {
+    let dockerfile_path_str = dockerfile_path.to_str().unwrap();
+
+    println!("Building image: {}/{} -> {}", dockerfile_path_str, dockerfile, image);
 
     let mut docker_args :Vec<&str> = vec![
             "build"
@@ -374,7 +376,7 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &String) ->
     docker_args.push(image);
     docker_args.push("-f");
     docker_args.push(dockerfile);
-    docker_args.push(dockerfile_path);
+    docker_args.push(dockerfile_path_str);
 
     println!("{} docker {}", "(executing)    ".bright_blue().bold(), docker_args.join(" "));
 
@@ -389,18 +391,21 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &String) ->
 fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result<bool, Error> {
     let current_path = std::env::current_dir().unwrap();
     let path_clone = current_path.clone();
-    let current_dir = current_path.as_path().to_str().unwrap();
 
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
-    if let Some(c) = load_config(path_clone, command) {
+    if  let Some(c) = load_config(path_clone, command) {
+        let current_path = current_path.as_path().strip_prefix(c.root_path.to_str().unwrap()).unwrap();
+        let current_path_str = current_path.to_str().unwrap();
+        let absolute_current_path = format!("/workdir/{}", current_path_str);
+        let absolute_current_path_str = absolute_current_path.as_str();
 
         // Check if image exists locally
         if ! image_exists(&c.image) {
             // Try downloading it
             if ! download_image(&c.image) {
                 // Otherwise, build it
-                if ! build_image(&c.image, &c.dockerfile, &c.path) {
-                    panic!("Unable to build docker image: {} with dockerfile: {}/{}", c.image, c.path, c.dockerfile);
+                if ! build_image(&c.image, &c.dockerfile, &c.root_path) {
+                    panic!("Unable to build docker image: {} with dockerfile: {}/{}", c.image, c.root_path.to_str().unwrap(), c.dockerfile);
                 }
             }
         }
@@ -408,15 +413,15 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
         println!("{} {}", format!("(using image)  ").blue().bold(), c.image);
 
         if let Some(n) = c.name.clone() {
-            if container_exists(&n) && command == "/bin/bash" {
+            if container_exists(&n) {
                 println!("{} {}", format!("(executing inside existing container)  ").blue().bold(), &n);
-                docker_exec(c, options, n.as_str(), command, args);
+                docker_exec(absolute_current_path_str, c, options, n.as_str(), command, args);
                 return Ok(true);
             }else{
-              docker_run(current_dir, c, options, command, args);  
+              docker_run(absolute_current_path_str, c, options, command, args);  
             }
         }else{
-            docker_run(current_dir, c, options, command, args);
+            docker_run(absolute_current_path_str, c, options, command, args);
         }
 
     }else{
@@ -431,7 +436,7 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
     let gid = get_current_gid();
     let uid_gid = format!("{}:{}", uid, gid);
 
-    let mount = format!("type=bind,src={},dst=/workdir", current_dir);
+    let mount = format!("type=bind,src={},dst=/workdir", c.root_path.to_str().unwrap());
 
     let mut docker_args :Vec<&str> = vec![
         "run"
@@ -460,6 +465,8 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
         docker_args.push("-it");
     };
 
+    docker_args.push("-w");
+    docker_args.push(current_dir);
 
     if c.env_variables.len() > 0 {
         for i in 0..c.env_variables.len() {
@@ -502,7 +509,7 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
     return execute_command(options, "docker", docker_args);
 }
 
-fn docker_exec(c: Configuration, options: GlobalOptions, name: &str, command: &str, args: Vec<&str>) {
+fn docker_exec(current_dir: &str, c: Configuration, options: GlobalOptions, name: &str, command: &str, args: Vec<&str>) {
     let uid = get_current_uid();
     let gid = get_current_gid();
     let uid_gid = format!("{}:{}", uid, gid);
@@ -517,6 +524,9 @@ fn docker_exec(c: Configuration, options: GlobalOptions, name: &str, command: &s
         docker_args.push("-u");
         docker_args.push(uid_gid.as_str());
     }
+
+    docker_args.push("-w");
+    docker_args.push(current_dir);
 
     if c.env_variables.len() > 0 {
         for i in 0..c.env_variables.len() {
