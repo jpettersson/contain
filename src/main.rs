@@ -11,6 +11,7 @@ extern crate quick_error;
 use std::process::{Command, Stdio};
 use std::path::PathBuf;
 use std::collections::HashMap;
+use std::env;
 
 use clap::{Arg, App, AppSettings};
 use colored::*;
@@ -42,7 +43,8 @@ struct GlobalOptions {
     run_as_root: bool,
     dry_run: bool,
     skip_ports: bool,
-    skip_name: bool
+    skip_name: bool,
+    cli_env_variables: Vec<String>
 }
 
 impl GlobalOptions {
@@ -72,6 +74,10 @@ impl GlobalOptions {
 
     fn skip_name(&mut self, a: bool) {
         self.skip_name = a;
+    }
+
+    fn add_env_variable(&mut self, a: String) {
+        self.cli_env_variables.push(a);
     }
 }
 
@@ -103,7 +109,8 @@ fn run() -> Result<bool, Error> {
         dry_run: false,
         run_as_root: false,
         skip_ports: false,
-        skip_name: false
+        skip_name: false,
+        cli_env_variables: vec![]
     };
 
     let matches = App::new("contain")
@@ -138,6 +145,10 @@ fn run() -> Result<bool, Error> {
                     "--root" => options.run_as_root(true),
                     "--skip-ports" => options.skip_ports(true),
                     "--skip-name" => options.skip_name(true),
+                    x if x.as_bytes()[1] == b'e' => {
+                        let slice = &x[2..];
+                        options.add_env_variable(slice.to_string())
+                        },
                     _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
                 }
                 num_program_flags += 1;
@@ -225,6 +236,8 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                     env_variables = vec_string;
                 }
             }
+
+            env::set_var("CONTAIN_ROOT_PATH", path_str);
 
             let mut extra_mounts: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("mounts") {
@@ -381,6 +394,7 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf) -
     println!("{} docker {}", "(executing)    ".bright_blue().bold(), docker_args.join(" "));
 
     let status = Command::new("docker")
+        .current_dir(dockerfile_path_str)
         .args(docker_args)
         .status()
         .expect("failed to execute process 'docker pull IMAGE'");
@@ -394,6 +408,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
 
     println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
     if  let Some(c) = load_config(path_clone, command) {
+
         let current_path = current_path.as_path().strip_prefix(c.root_path.to_str().unwrap()).unwrap();
         let current_path_str = current_path.to_str().unwrap();
         let absolute_current_path = format!("/workdir/{}", current_path_str);
@@ -418,7 +433,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
                 docker_exec(absolute_current_path_str, c, options, n.as_str(), command, args);
                 return Ok(true);
             }else{
-              docker_run(absolute_current_path_str, c, options, command, args);  
+              docker_run(absolute_current_path_str, c, options, command, args);
             }
         }else{
             docker_run(absolute_current_path_str, c, options, command, args);
@@ -468,9 +483,11 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
     docker_args.push("-w");
     docker_args.push(current_dir);
 
-    if c.env_variables.len() > 0 {
-        for i in 0..c.env_variables.len() {
-            let item = &c.env_variables[i];
+    let all_env_variables = [&c.env_variables[..], &options.cli_env_variables[..]].concat();
+
+    if all_env_variables.len() > 0 {
+        for i in 0..all_env_variables.len() {
+            let item = &all_env_variables[i];
             docker_args.push("-e");
             docker_args.push(item.trim());
         }
@@ -528,9 +545,11 @@ fn docker_exec(current_dir: &str, c: Configuration, options: GlobalOptions, name
     docker_args.push("-w");
     docker_args.push(current_dir);
 
-    if c.env_variables.len() > 0 {
-        for i in 0..c.env_variables.len() {
-            let item = &c.env_variables[i];
+    let all_env_variables = [&c.env_variables[..], &options.cli_env_variables[..]].concat();
+
+    if all_env_variables.len() > 0 {
+        for i in 0..all_env_variables.len() {
+            let item = &all_env_variables[i];
             docker_args.push("-e");
             docker_args.push(item.trim());
         }
