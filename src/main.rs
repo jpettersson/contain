@@ -406,8 +406,8 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
     let current_path = std::env::current_dir().unwrap();
     let path_clone = current_path.clone();
 
-    println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), path_clone.to_str().unwrap());
     if  let Some(c) = load_config(path_clone, command) {
+        println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), c.root_path.to_str().unwrap());
 
         let current_path = current_path.as_path().strip_prefix(c.root_path.to_str().unwrap()).unwrap();
         let current_path_str = current_path.to_str().unwrap();
