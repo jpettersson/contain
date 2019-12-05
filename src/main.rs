@@ -225,12 +225,44 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                 .clone()
                 .into_str().unwrap();
 
+
+            if let Some(node) = command_entry.get("var") {
+                let node_clone = node.clone();
+                if let Ok(vec) = node_clone.into_array() {
+                    for i in 0..vec.len() {
+                        let item = &vec[i];
+                        if let Ok(obj) = item.clone().into_table() {
+                            let var_name = obj.get("name").unwrap();
+                            let var_cmd = obj.get("command").unwrap();
+
+                            let var_name_string = var_name.to_string();
+                            let var_cmd_string = var_cmd.to_string();
+
+                            let result = Command::new("sh")
+                                        .arg("-c")
+                                        .arg(var_cmd_string)
+                                        .output()
+                                        .expect("Failed to execute process: docker");
+
+                            let output = String::from_utf8_lossy(&result.stdout)
+                                .to_string()
+                                .trim()
+                                .to_string();
+
+                            env::set_var(var_name_string, output);
+                        }
+                    }
+                }
+            }
+
+
             let mut env_variables: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("env") {
                 let node_clone = node.clone();
                 if let Ok(vec) = node_clone.into_array() {
                     let vec_string : Vec<String> = vec.into_iter()
                                                             .map(|value| value.into_str().unwrap())
+                                                            .map(|value| shellexpand::env(&value).unwrap().into_owned())
                                                             .collect();
 
                     env_variables = vec_string;
