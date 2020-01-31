@@ -88,6 +88,7 @@ struct Configuration {
     dockerfile: String,
     root_path: PathBuf,
     flags: Vec<String>,
+    workdir_path: String,
     env_variables: Vec<String>,
     extra_mounts: Vec<String>,
     ports: Vec<String>
@@ -321,11 +322,17 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                 }
             }
 
+            let workdir_path = match env::var("WORKDIR_PATH") {
+                Ok(p) => p,
+                Err(_) => "/workdir".to_owned()
+            };
+
             let config_struct = Configuration {
                 image: image,
                 name: name,
                 dockerfile: dockerfile,
                 root_path: path,
+                workdir_path: workdir_path,
                 flags: flags,
                 env_variables: env_variables,
                 extra_mounts: extra_mounts,
@@ -391,7 +398,7 @@ fn container_exists(name: &String) -> bool {
     return &output == name;
 }
 
-fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf) -> bool {
+fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, workdir_path: &String) -> bool {
     let dockerfile_path_str = dockerfile_path.to_str().unwrap();
 
     println!("Building image: {}/{} -> {}", dockerfile_path_str, dockerfile, image);
@@ -410,6 +417,7 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf) -
     let uid_str = format!("uid={}", uid);
     let gid_str = format!("gid={}", get_current_gid());
     let username_str = format!("username={}", username.as_str());
+    let workdir_path_str = format!("workdir_path={}", workdir_path);
 
     docker_args.push("--build-arg");
     docker_args.push(&uid_str);
@@ -417,6 +425,8 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf) -
     docker_args.push(&gid_str);
     docker_args.push("--build-arg");
     docker_args.push(&username_str);
+    docker_args.push("--build-arg");
+    docker_args.push(&workdir_path_str);
     docker_args.push("-t");
     docker_args.push(image);
     docker_args.push("-f");
@@ -443,7 +453,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
 
         let current_path = current_path.as_path().strip_prefix(c.root_path.to_str().unwrap()).unwrap();
         let current_path_str = current_path.to_str().unwrap();
-        let absolute_current_path = format!("/workdir/{}", current_path_str);
+        let absolute_current_path = format!("{}/{}", c.workdir_path, current_path_str);
         let absolute_current_path_str = absolute_current_path.as_str();
 
         // Check if image exists locally
@@ -451,7 +461,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
             // Try downloading it
             if ! download_image(&c.image) {
                 // Otherwise, build it
-                if ! build_image(&c.image, &c.dockerfile, &c.root_path) {
+                if ! build_image(&c.image, &c.dockerfile, &c.root_path, &c.workdir_path) {
                     panic!("Unable to build docker image: {} with dockerfile: {}/{}", c.image, c.root_path.to_str().unwrap(), c.dockerfile);
                 }
             }
@@ -483,7 +493,7 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
     let gid = get_current_gid();
     let uid_gid = format!("{}:{}", uid, gid);
 
-    let mount = format!("type=bind,src={},dst=/workdir", c.root_path.to_str().unwrap());
+    let mount = format!("type=bind,src={},dst={}", c.root_path.to_str().unwrap(), c.workdir_path);
 
     let mut docker_args :Vec<&str> = vec![
         "run"
