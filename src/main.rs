@@ -8,7 +8,7 @@ extern crate shellexpand;
 #[macro_use]
 extern crate quick_error;
 
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, exit};
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::env;
@@ -616,15 +616,20 @@ fn execute_command(options: GlobalOptions, command: &str, args: Vec<&str>) {
                        .spawn()
                        .expect("Could not run the command")
                        .wait() {
-                            Ok(_result) => {
-                                if options.keep_container {
-                                    println!("{} {}", format!("(kept container)  ").green().bold(), "CONTAINER_ID");
-                                }
-                                if options.persist_image {
-                                    println!("{} {}", format!("(persisted changes to)  ").green().bold(), "IMAGE_ID");
+                            Ok(status) => {
+                                // if options.keep_container {
+                                //     println!("{} {}", format!("(kept container)  ").green().bold(), "CONTAINER_ID");
+                                // }
+                                // if options.persist_image {
+                                //     println!("{} {}", format!("(persisted changes to)  ").green().bold(), "IMAGE_ID");
+                                // }
+                                
+                                match status.code() {
+                                    Some(code) => exit(code),
+                                    None       => exit(0)
                                 }
                             },
-                            Err(err) => println!("{:?}", err)
+                            Err(err) => println!("ERROR {:?}", err)
                         }
     } else {
         println!("{} {} {}", "(dry run)      ".yellow().bold(), command, args.join(" "));
