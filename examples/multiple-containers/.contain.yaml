@@ -1,9 +1,9 @@
 images:
-  - image: "gcr.io/styra-infra/mvn:latest"
+  - image: "my-mvn-image:latest"
     dockerfile: Dockerfile.mvn
     commands: mvn
 
-  - image: "gcr.io/styra-infra/yarn:latest"
+  - image: "my-yarn-image:latest"
     dockerfile: Dockerfile.yarn
     commands:
       - yarn
