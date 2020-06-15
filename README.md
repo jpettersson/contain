@@ -6,7 +6,7 @@ Contain is an CLI tool that transparently runs your development tools inside doc
 
 **Experiemental pre-release**
 
-**Disclaimer:** The functionality and stability of this tool have been validated for a certain use-case. However, this is an early release of an experimental tool. Use at your own risk. Future version will most likely include breaking changes. Many aspects of the project will need to be improved before you can consider this a production-ready project: 
+**Disclaimer:** The functionality and stability of this tool have been validated for a specific use-case: enable a shared standardized dev environment across machines in a small team. However, this is an early release of an experimental tool. Use at your own risk. Future version will most likely include breaking changes. Many aspects of the project will need to be improved before you can consider this a production-ready project: 
 
 * Documentation
 * More examples
@@ -36,16 +36,16 @@ Benefits of contain:
 
 You can either download a binary release or build the project from scratch easily with cargo. In both cases you need to place the binary in a dir that's included in your `$PATH`.
 
-#### Download a binary release
-
-You can download binary releases [here](https://github.com/jpettersson/contain/releases).
-
-#### Build with cargo
+#### Build with cargo (recommended)
 
 ```
 cargo build
 ```
 
+#### Download a binary release
+
+You can download binary releases [here](https://github.com/jpettersson/contain/releases).
+
 ### Collaboration
 
-Collaboration is highly welcomed. I'm keeping a list of the most relevant bugs, features and todos up to date in the issues. Take a look and feel free to ping me in case you would like to help out.
+Collaboration is highly welcomed! I'm keeping a list of the most relevant bugs, features and todos up to date in the issues. Take a look and feel free to ping me in case you would like work on this.
