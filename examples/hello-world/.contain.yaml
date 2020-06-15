@@ -1,0 +1,5 @@
+images:
+  - image: "contain-hello-world:latest"
+    name: contain-hello-world
+    dockerfile: Dockerfile
+    commands: any
