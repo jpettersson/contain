@@ -6,18 +6,18 @@ Contain is an CLI tool that transparently runs your development tools inside doc
 
 **Experiemental pre-release**
 
-Disclaimer: The functionality and stability of this tool have been validated for a certain use-case. However, this is an early release of an experimental tool. Many aspects of the project will need to be improved before you can consider this a production-ready project: 
+**Disclaimer:** The functionality and stability of this tool have been validated for a certain use-case. However, this is an early release of an experimental tool. Use at your own risk. Future version will most likely include breaking changes. Many aspects of the project will need to be improved before you can consider this a production-ready project: 
 
 * Documentation
-* Examples
+* More examples
 * Automated tests
-* Clean up and refactor contain core
+* Clean up and refactor code
 
 If you are still interested (and brave), take a look at the examples directory for concrete examples of how you can use the tool. Also, if you are really curious, take a look at the INTERNALS.md file for some details of how it works.
 
 ### Rationale 
 
-Containers have had a huge impact on how we build and deploy software. However, the development environment is typically still a hand-crafted workstation which contains certain versions of programming languages, tools and other programs. To make matters worse, we rarely document / automate how we configure our dev environments. It's especially painful to manage all these dependencies when collaborating with others on a project with multiple technologies.
+Containers have had a positive impact on how we build and deploy software. However, the typical development environment is still a hand-crafted workstation which contains certain versions of programming languages, tools and other programs. To make matters worse, we rarely document / automate how we configure our dev environments. It's especially painful to manage all these dependencies when collaborating with others on a project with multiple technologies.
 
 In essence, the typical development environment is: 
 * Hand-crafted & time-consuming to reproduce
@@ -32,29 +32,20 @@ Benefits of contain:
 * No manual installation of development tools
 * Standardized dev environments across you team
 
-### Features & todo:
-* Write README & project examples
-* Decide MVP scope
-* -p flag: Implement logic for persisting images from running containers (to allow dependencies to be installed in images, etc)
-* Display IP address of docker container for long running commands (web servers, etc)
-* Detect & use docker-machine when needed
-* Ensure containers shut down on termination signals
-* Ensure that interactive scripts work (issue with lein repl quitting immidiately)
-* Helper methods for building docker images?
-* Get rid of all `.unwrap()` calls
-* Support IDE plugins using docker exec (background processes)
-  * Start a container in the background and execute rustc, leiningen, etc inside it.
+### Installation
 
-Configuration (.contain.yaml)
-* Support ENV variables in entire .contain.yaml file
+You can either download a binary release or build the project from scratch easily with cargo. In both cases you need to place the binary in a dir that's included in your `$PATH`.
 
-Scaffolding Dockerfiles
-* Specify template Dockerfiles in ~/.contain.yaml
-* Include defaults in the documentation
+#### Download a binary release
 
-### Testing todo:
-* Ensure required environment variables are readable
-* Ensure -p and -k flags work as expected
-* Ensure the run, pull build strategy works
-* Test important permutations of the config file format
-* Test config file validation
+You can download binary releases [here](https://github.com/jpettersson/contain/releases).
+
+#### Build with cargo
+
+```
+cargo build
+```
+
+### Collaboration
+
+Collaboration is highly welcomed. I'm keeping a list of the most relevant bugs, features and todos up to date in the issues. Take a look and feel free to ping me in case you would like to help out.

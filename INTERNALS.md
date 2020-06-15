@@ -1,3 +1,16 @@
+### Contain procedure
+
+Very briefly, contain acts as a proxy for running commands inside docker containers. It handles the full life-cycle of downloading or building a docker image and then instantiating a container from it. The procedure is:
+
+1. Look for `.contain.yaml` or walk the directory tree upwards until `.contain.yaml` file is found.
+2. Look for the `contain ...` command key
+2. If found, use the image specified
+  * If not exists, try to download it from a registry
+  * If not found, build it from the Dockerfile specified
+3. Start docker container:
+  * Mount local directory & ports
+4. Execute the command
+
 ### How it works
 
 1. The contain cli acts as a proxy, it takes a command and executes it inside a docker container:
