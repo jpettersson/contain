@@ -37,7 +37,7 @@ Benefits of contain:
 ### Arch Linux packagee
 
 ```
-Coming soon..
+[contain](https://aur.archlinux.org/packages/contain/)
 ```
 
 #### Build with cargo
@@ -47,10 +47,6 @@ You can build the binary from scratch easily with cargo. Place the binary in a d
 ```
 cargo build --release --frozen --all-targets
 ```
-
-#### Download a binary release
-
-You can download binary releases [here](https://github.com/jpettersson/contain/releases).
 
 ### Collaboration
 
