@@ -36,9 +36,7 @@ Benefits of contain:
 
 ### Arch Linux packagee
 
-```
 [contain](https://aur.archlinux.org/packages/contain/)
-```
 
 #### Build with cargo
 
