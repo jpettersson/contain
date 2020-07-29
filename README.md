@@ -34,12 +34,18 @@ Benefits of contain:
 
 ### Installation
 
-You can either download a binary release or build the project from scratch easily with cargo. In both cases you need to place the binary in a dir that's included in your `$PATH`.
-
-#### Build with cargo (recommended)
+### Arch Linux packagee
 
 ```
-cargo build
+Coming soon..
+```
+
+#### Build with cargo
+
+You can build the binary from scratch easily with cargo. Place the binary in a dir that's included in your `$PATH`.
+
+```
+cargo build --release --frozen --all-targets
 ```
 
 #### Download a binary release
