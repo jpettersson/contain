@@ -238,13 +238,13 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                             let var_cmd = obj.get("command").unwrap();
 
                             let var_name_string = var_name.to_string();
-                            let var_cmd_string = var_cmd.to_string();
+                            let var_cmd_string = shellexpand::env(&var_cmd.to_string()).unwrap().into_owned();
 
                             let result = Command::new("sh")
                                         .arg("-c")
                                         .arg(var_cmd_string)
                                         .output()
-                                        .expect("Failed to execute process: docker");
+                                        .expect("Failed to execute process: sh");
 
                             let output = String::from_utf8_lossy(&result.stdout)
                                 .to_string()
