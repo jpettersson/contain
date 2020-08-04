@@ -90,6 +90,7 @@ struct Configuration {
     flags: Vec<String>,
     workdir_path: String,
     env_variables: Vec<String>,
+    build_args: Vec<String>,
     extra_mounts: Vec<String>,
     ports: Vec<String>
 }
@@ -265,8 +266,19 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                                                             .map(|value| value.into_str().unwrap())
                                                             .map(|value| shellexpand::env(&value).unwrap().into_owned())
                                                             .collect();
-
                     env_variables = vec_string;
+                }
+            }
+
+            let mut build_args: Vec<String> = Vec::new();
+            if let Some(node) = command_entry.get("build_args") {
+                let node_clone = node.clone();
+                if let Ok(vec) = node_clone.into_array() {
+                    let vec_string : Vec<String> = vec.into_iter()
+                                                            .map(|value| value.into_str().unwrap())
+                                                            .map(|value| shellexpand::env(&value).unwrap().into_owned())
+                                                            .collect();
+                                                            build_args = vec_string;
                 }
             }
 
@@ -335,6 +347,7 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                 workdir_path: workdir_path,
                 flags: flags,
                 env_variables: env_variables,
+                build_args: build_args,
                 extra_mounts: extra_mounts,
                 ports: ports
             };
@@ -398,7 +411,7 @@ fn container_exists(name: &String) -> bool {
     return &output == name;
 }
 
-fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, workdir_path: &String) -> bool {
+fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, workdir_path: &String, build_args: &Vec<String>) -> bool {
     let dockerfile_path_str = dockerfile_path.to_str().unwrap();
 
     println!("Building image: {}/{} -> {}", dockerfile_path_str, dockerfile, image);
@@ -427,6 +440,15 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, w
     docker_args.push(&username_str);
     docker_args.push("--build-arg");
     docker_args.push(&workdir_path_str);
+
+    if build_args.len() > 0 {
+        for i in 0..build_args.len() {
+            let item = &build_args[i];
+            docker_args.push("--build-arg");
+            docker_args.push(item.trim());
+        }
+    }
+
     docker_args.push("-t");
     docker_args.push(image);
     docker_args.push("-f");
@@ -461,7 +483,7 @@ fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result
             // Try downloading it
             if ! download_image(&c.image) {
                 // Otherwise, build it
-                if ! build_image(&c.image, &c.dockerfile, &c.root_path, &c.workdir_path) {
+                if ! build_image(&c.image, &c.dockerfile, &c.root_path, &c.workdir_path, &c.build_args) {
                     panic!("Unable to build docker image: {} with dockerfile: {}/{}", c.image, c.root_path.to_str().unwrap(), c.dockerfile);
                 }
             }
