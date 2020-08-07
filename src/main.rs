@@ -2,6 +2,7 @@ extern crate config;
 extern crate colored;
 extern crate users;
 extern crate shellexpand;
+extern crate semver;
 
 #[macro_use] extern crate clap;
 
@@ -16,6 +17,7 @@ use std::env;
 use clap::{Arg, App, AppSettings};
 use colored::*;
 use users::{get_user_by_uid, get_current_uid, get_current_gid};
+use semver::Version;
 
 quick_error! {
     #[derive(Debug)]
@@ -213,7 +215,24 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
         .merge(config::File::with_name(&full_path));
 
     if let Ok(ref config) = result {
+
+        let min_version:Option<String> = match config.get("contain_min_version") {
+            Ok(n) => Some(n),
+            Err(_) => None
+        };
+
+        if let Some(v) = min_version {
+            if Version::parse(crate_version!()) < Version::parse(&v) {
+                let required_version = &v.as_str();
+                let current_version = &crate_version!();
+
+                println!("ERROR: .contain.yaml requires contain version >= {} (current version: {})", required_version, current_version);
+                exit(1);
+            }
+        };
+
         if let Some(command_entry) = get_config_table(config, command) {
+            
             let image = command_entry.get("image").unwrap()
                 .clone()
                 .into_str().unwrap();

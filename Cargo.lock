@@ -81,6 +81,7 @@ dependencies = [
  "colored 1.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "config 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "quick-error 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "semver 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "shellexpand 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "users 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -199,6 +200,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "ryu"
 version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "semver"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "semver-parser 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "semver-parser"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -371,6 +385,8 @@ dependencies = [
 "checksum regex-syntax 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "747ba3b235651f6e2f67dfa8bcdcd073ddb7c243cb21c442fc12395dfcac212d"
 "checksum rust-ini 0.12.2 (registry+https://github.com/rust-lang/crates.io-index)" = "ac66e816614e124a692b6ac1b8437237a518c9155a3aacab83a373982630c715"
 "checksum ryu 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "7153dd96dade874ab973e098cb62fcdbb89a03682e46b144fd09550998d4a4a7"
+"checksum semver 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "394cec28fa623e00903caf7ba4fa6fb9a0e260280bb8cdbbba029611108a0190"
+"checksum semver-parser 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 "checksum serde 0.8.23 (registry+https://github.com/rust-lang/crates.io-index)" = "9dad3f759919b92c3068c696c15c3d17238234498bbdcc80f2c469606f948ac8"
 "checksum serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)" = "15c141fc7027dd265a47c090bf864cf62b42c4d228bbcf4e51a0c9e2b0d3f7ef"
 "checksum serde-hjson 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)" = "0b833c5ad67d52ced5f5938b2980f32a9c1c5ef047f0b4fb3127e7a423c76153"
