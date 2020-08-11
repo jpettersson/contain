@@ -563,6 +563,10 @@ fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, comma
         docker_args.push("-it");
     };
 
+    if c.flags.contains(&"privileged".to_string()) {
+        docker_args.push("--privileged");
+    };
+
     docker_args.push("-w");
     docker_args.push(current_dir);
 
