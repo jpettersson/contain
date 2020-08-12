@@ -208,6 +208,8 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
         .to_str()
         .unwrap();
 
+    env::set_var("CONTAIN_ROOT_PATH", path_str);
+
     let full_path = format!("{}/{}", path_str, CONTAIN_FILENAME);
     let mut pending_config = config::Config::default();
 
@@ -300,8 +302,6 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                                                             build_args = vec_string;
                 }
             }
-
-            env::set_var("CONTAIN_ROOT_PATH", path_str);
 
             let mut extra_mounts: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("mounts") {
