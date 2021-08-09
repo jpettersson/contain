@@ -34,7 +34,7 @@ Benefits of contain:
 
 ### Installation
 
-### Arch Linux packagee
+### Arch Linux package
 
 [contain](https://aur.archlinux.org/packages/contain/)
 
