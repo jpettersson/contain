@@ -22,13 +22,32 @@ use semver::Version;
 quick_error! {
     #[derive(Debug)]
     pub enum Error {
-        DockerError(descr: ColoredString) {
-            description(descr)
-            display("Error: {}", descr)
+        DockerError(descr: String) {
+            display("Docker error: {}", descr)
         }
-        UnsupportedParameters(descr: ColoredString) {
-            description(descr)
-            display("Error: {}", descr)
+        ConfigError(descr: String) {
+            display("Configuration error: {}", descr)
+        }
+        ConfigMissingField { file: String, field: String } {
+            display("Missing required field '{}' in {}", field, file)
+        }
+        ConfigInvalidValue { file: String, field: String, reason: String } {
+            display("Invalid value for '{}' in {}: {}", field, file, reason)
+        }
+        PathError(descr: String) {
+            display("Path error: {}", descr)
+        }
+        CommandError { cmd: String, reason: String } {
+            display("Failed to execute '{}': {}", cmd, reason)
+        }
+        UnsupportedParameters(descr: String) {
+            display("Unsupported parameter: {}", descr)
+        }
+        NoConfigFound { command: String } {
+            display("No docker image found for '{}' in .contain.yaml or any path above", command)
+        }
+        ImageBuildFailed { image: String, dockerfile: String } {
+            display("Unable to build docker image '{}' from dockerfile '{}'", image, dockerfile)
         }
     }
 }
@@ -97,6 +116,66 @@ struct Configuration {
     ports: Vec<String>
 }
 
+fn get_required_string(table: &HashMap<String, config::Value>, field: &str, file: &str) -> Result<String, Error> {
+    table.get(field)
+        .ok_or_else(|| Error::ConfigMissingField {
+            file: file.to_string(),
+            field: field.to_string()
+        })?
+        .clone()
+        .into_str()
+        .map_err(|_| Error::ConfigInvalidValue {
+            file: file.to_string(),
+            field: field.to_string(),
+            reason: "expected a string".to_string()
+        })
+}
+
+fn get_optional_string(table: &HashMap<String, config::Value>, field: &str, file: &str) -> Result<Option<String>, Error> {
+    match table.get(field) {
+        None => Ok(None),
+        Some(v) => v.clone()
+            .into_str()
+            .map(Some)
+            .map_err(|_| Error::ConfigInvalidValue {
+                file: file.to_string(),
+                field: field.to_string(),
+                reason: "expected a string".to_string()
+            })
+    }
+}
+
+fn get_string_array(table: &HashMap<String, config::Value>, field: &str, file: &str) -> Result<Vec<String>, Error> {
+    match table.get(field) {
+        None => Ok(Vec::new()),
+        Some(node) => {
+            let vec = node.clone()
+                .into_array()
+                .map_err(|_| Error::ConfigInvalidValue {
+                    file: file.to_string(),
+                    field: field.to_string(),
+                    reason: "expected an array".to_string()
+                })?;
+            vec.into_iter()
+                .map(|value| {
+                    let s = value.into_str().map_err(|_| Error::ConfigInvalidValue {
+                        file: file.to_string(),
+                        field: field.to_string(),
+                        reason: "expected array of strings".to_string()
+                    })?;
+                    shellexpand::env(&s)
+                        .map(|expanded| expanded.into_owned())
+                        .map_err(|e| Error::ConfigInvalidValue {
+                            file: file.to_string(),
+                            field: field.to_string(),
+                            reason: format!("environment variable expansion failed: {}", e)
+                        })
+                })
+                .collect()
+        }
+    }
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("{}", err);
@@ -153,7 +232,7 @@ fn run() -> Result<bool, Error> {
                         let slice = &x[2..];
                         options.add_env_variable(slice.to_string())
                         },
-                    _ => return Err(Error::UnsupportedParameters(format!("Unsupported contain flag {}", command).red()))
+                    _ => return Err(Error::UnsupportedParameters(format!("{}", flag)))
                 }
                 num_program_flags += 1;
                 flag = args[num_program_flags-1];
@@ -178,17 +257,28 @@ fn run() -> Result<bool, Error> {
 }
 
 fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<String, config::Value>> {
-    if let Ok(array) = config.get_array("images") {
-        for node in &array {
-            let table = &node.clone().into_table().unwrap();
+    let array = config.get_array("images").ok()?;
 
-            if let Ok(string) = table.get("commands").unwrap().clone().into_str() {
-                if string == command || string == "any" {
-                    return Some(table.clone())
-                }
-            }else if let Ok(entries) = table.get("commands").unwrap().clone().into_array() {
-                for entry in &entries {
-                    let entry_string = entry.clone().into_str().unwrap();
+    for node in &array {
+        let table = match node.clone().into_table() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let commands_value = match table.get("commands") {
+            Some(v) => v.clone(),
+            None => continue,
+        };
+
+        // Check if commands is a single string
+        if let Ok(string) = commands_value.clone().into_str() {
+            if string == command || string == "any" {
+                return Some(table.clone())
+            }
+        // Check if commands is an array of strings
+        } else if let Ok(entries) = commands_value.into_array() {
+            for entry in &entries {
+                if let Ok(entry_string) = entry.clone().into_str() {
                     if entry_string == command || entry_string == "any" {
                         return Some(table.clone())
                     }
@@ -201,12 +291,11 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
     None
 }
 
-fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
+fn load_config(mut path: PathBuf, command: &str) -> Result<Configuration, Error> {
 
-    let path_clone = path.clone();
-    let path_str = path_clone.as_path()
+    let path_str = path.as_path()
         .to_str()
-        .unwrap();
+        .ok_or_else(|| Error::PathError("Path contains invalid UTF-8".to_string()))?;
 
     env::set_var("CONTAIN_ROOT_PATH", path_str);
 
@@ -218,54 +307,56 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
 
     if let Ok(ref config) = result {
 
-        let min_version:Option<String> = match config.get("contain_min_version") {
-            Ok(n) => Some(n),
-            Err(_) => None
-        };
+        let min_version: Option<String> = config.get("contain_min_version").ok();
 
         if let Some(v) = min_version {
             if Version::parse(crate_version!()) < Version::parse(&v) {
-                let required_version = &v.as_str();
-                let current_version = &crate_version!();
-
-                println!("ERROR: .contain.yaml requires contain version >= {} (current version: {})", required_version, current_version);
-                exit(1);
+                return Err(Error::ConfigError(format!(
+                    "{} requires contain version >= {} (current version: {})",
+                    full_path, v, crate_version!()
+                )));
             }
         };
 
         if let Some(command_entry) = get_config_table(config, command) {
-            
-            let image = command_entry.get("image").unwrap()
-                .clone()
-                .into_str().unwrap();
 
-            let name = match command_entry.get("name") {
-                None => None,
-                Some(n) => Some(n.clone().into_str().unwrap())
-            };
+            let image = get_required_string(&command_entry, "image", &full_path)?;
+            let name = get_optional_string(&command_entry, "name", &full_path)?;
+            let dockerfile = get_required_string(&command_entry, "dockerfile", &full_path)?;
 
-            let dockerfile = command_entry.clone().get("dockerfile").unwrap()
-                .clone()
-                .into_str().unwrap();
-
-
+            // Process var definitions (execute commands to set environment variables)
             if let Some(node) = command_entry.get("var") {
-                let node_clone = node.clone();
-                if let Ok(vec) = node_clone.into_array() {
-                    for i in 0..vec.len() {
-                        let item = &vec[i];
+                if let Ok(vec) = node.clone().into_array() {
+                    for item in &vec {
                         if let Ok(obj) = item.clone().into_table() {
-                            let var_name = obj.get("name").unwrap();
-                            let var_cmd = obj.get("command").unwrap();
+                            let var_name = obj.get("name")
+                                .ok_or_else(|| Error::ConfigMissingField {
+                                    file: full_path.clone(),
+                                    field: "var[].name".to_string()
+                                })?;
+                            let var_cmd = obj.get("command")
+                                .ok_or_else(|| Error::ConfigMissingField {
+                                    file: full_path.clone(),
+                                    field: "var[].command".to_string()
+                                })?;
 
                             let var_name_string = var_name.to_string();
-                            let var_cmd_string = shellexpand::env(&var_cmd.to_string()).unwrap().into_owned();
+                            let var_cmd_string = shellexpand::env(&var_cmd.to_string())
+                                .map_err(|e| Error::ConfigInvalidValue {
+                                    file: full_path.clone(),
+                                    field: "var[].command".to_string(),
+                                    reason: format!("environment variable expansion failed: {}", e)
+                                })?
+                                .into_owned();
 
                             let result = Command::new("sh")
-                                        .arg("-c")
-                                        .arg(var_cmd_string)
-                                        .output()
-                                        .expect("Failed to execute process: sh");
+                                .arg("-c")
+                                .arg(&var_cmd_string)
+                                .output()
+                                .map_err(|e| Error::CommandError {
+                                    cmd: format!("sh -c '{}'", var_cmd_string),
+                                    reason: e.to_string()
+                                })?;
 
                             let output = String::from_utf8_lossy(&result.stdout)
                                 .to_string()
@@ -278,47 +369,46 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                 }
             }
 
+            let env_variables = get_string_array(&command_entry, "env", &full_path)?;
+            let build_args = get_string_array(&command_entry, "build_args", &full_path)?;
 
-            let mut env_variables: Vec<String> = Vec::new();
-            if let Some(node) = command_entry.get("env") {
-                let node_clone = node.clone();
-                if let Ok(vec) = node_clone.into_array() {
-                    let vec_string : Vec<String> = vec.into_iter()
-                                                            .map(|value| value.into_str().unwrap())
-                                                            .map(|value| shellexpand::env(&value).unwrap().into_owned())
-                                                            .collect();
-                    env_variables = vec_string;
-                }
-            }
-
-            let mut build_args: Vec<String> = Vec::new();
-            if let Some(node) = command_entry.get("build_args") {
-                let node_clone = node.clone();
-                if let Ok(vec) = node_clone.into_array() {
-                    let vec_string : Vec<String> = vec.into_iter()
-                                                            .map(|value| value.into_str().unwrap())
-                                                            .map(|value| shellexpand::env(&value).unwrap().into_owned())
-                                                            .collect();
-                                                            build_args = vec_string;
-                }
-            }
-
+            // Process mounts
             let mut extra_mounts: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("mounts") {
-                let node_clone = node.clone();
-                if let Ok(vec) = node_clone.into_array() {
-                    for i in 0..vec.len() {
-                        let item = &vec[i];
+                if let Ok(vec) = node.clone().into_array() {
+                    for (i, item) in vec.iter().enumerate() {
                         if let Ok(obj) = item.clone().into_table() {
-                            let mount_type = obj.get("type").unwrap();
-                            let src = obj.get("src").unwrap();
-                            let dst = obj.get("dst").unwrap();
+                            let mount_type = obj.get("type")
+                                .ok_or_else(|| Error::ConfigMissingField {
+                                    file: full_path.clone(),
+                                    field: format!("mounts[{}].type", i)
+                                })?;
+                            let src = obj.get("src")
+                                .ok_or_else(|| Error::ConfigMissingField {
+                                    file: full_path.clone(),
+                                    field: format!("mounts[{}].src", i)
+                                })?;
+                            let dst = obj.get("dst")
+                                .ok_or_else(|| Error::ConfigMissingField {
+                                    file: full_path.clone(),
+                                    field: format!("mounts[{}].dst", i)
+                                })?;
 
                             let src_string = src.to_string();
                             let dst_string = dst.to_string();
 
-                            let src_expanded = shellexpand::env(&src_string).unwrap();
-                            let dst_expanded = shellexpand::env(&dst_string).unwrap();
+                            let src_expanded = shellexpand::env(&src_string)
+                                .map_err(|e| Error::ConfigInvalidValue {
+                                    file: full_path.clone(),
+                                    field: format!("mounts[{}].src", i),
+                                    reason: format!("environment variable expansion failed: {}", e)
+                                })?;
+                            let dst_expanded = shellexpand::env(&dst_string)
+                                .map_err(|e| Error::ConfigInvalidValue {
+                                    file: full_path.clone(),
+                                    field: format!("mounts[{}].dst", i),
+                                    reason: format!("environment variable expansion failed: {}", e)
+                                })?;
 
                             let extra_options = match obj.get("options") {
                                 Some(s) => format!(",{}", s.to_string()),
@@ -331,87 +421,90 @@ fn load_config(mut path: PathBuf, command: &str) -> Option<Configuration> {
                 }
             }
 
+            // Process ports
             let mut ports: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("ports") {
-                let node_clone = node.clone();
-                if let Ok(vec) = node_clone.into_array() {
-                    for i in 0..vec.len() {
-                        let item = &vec[i];
+                if let Ok(vec) = node.clone().into_array() {
+                    for item in &vec {
                         ports.push(item.to_string());
                     }
                 }
             }
 
+            // Process flags
             let mut flags: Vec<String> = Vec::new();
             if let Some(node) = command_entry.get("flags") {
-                let node_clone = node.clone();
-                if let Ok(vec) = node_clone.into_array() {
-                    for i in 0..vec.len() {
-                        let item = &vec[i];
+                if let Ok(vec) = node.clone().into_array() {
+                    for item in &vec {
                         flags.push(item.to_string());
                     }
                 }
             }
 
-            let workdir_path = match env::var("WORKDIR_PATH") {
-                Ok(p) => p,
-                Err(_) => "/workdir".to_owned()
-            };
+            let workdir_path = env::var("WORKDIR_PATH").unwrap_or_else(|_| "/workdir".to_owned());
 
             let config_struct = Configuration {
-                image: image,
-                name: name,
-                dockerfile: dockerfile,
+                image,
+                name,
+                dockerfile,
                 root_path: path,
-                workdir_path: workdir_path,
-                flags: flags,
-                env_variables: env_variables,
-                build_args: build_args,
-                extra_mounts: extra_mounts,
-                ports: ports
+                workdir_path,
+                flags,
+                env_variables,
+                build_args,
+                extra_mounts,
+                ports
             };
 
-            return Some(config_struct);
-        }else{
+            return Ok(config_struct);
+        } else {
+            // Command not found in this config, try parent directory
             path.pop();
             return load_config(path, command);
         }
     } else {
+        // No config file at this path, try parent directory
         if path.as_os_str().len() > 1 {
             path.pop();
             return load_config(path, command);
-        }else{
-            // No config file found in tree
-            return None
+        } else {
+            // Reached root without finding config
+            return Err(Error::NoConfigFound { command: command.to_string() });
         }
     };
 }
 
-fn image_exists(image: &String) -> bool {
+fn image_exists(image: &String) -> Result<bool, Error> {
     let status = Command::new("docker")
         .arg("image")
         .arg("inspect")
         .arg(image)
         .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
-        .expect("failed to execute process 'docker inspect IMAGE'");
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker image inspect {}", image),
+            reason: e.to_string()
+        })?;
 
-        status.success()
+    Ok(status.success())
 }
 
-fn download_image(image: &String) -> bool {
+fn download_image(image: &String) -> Result<bool, Error> {
     println!("Downloading image: {}", image);
     let status = Command::new("docker")
         .arg("pull")
         .arg(image)
         .status()
-        .expect("failed to execute process 'docker pull IMAGE'");
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker pull {}", image),
+            reason: e.to_string()
+        })?;
 
-        status.success()
+    Ok(status.success())
 }
 
-fn container_exists(name: &String) -> bool {
-
+fn container_exists(name: &String) -> Result<bool, Error> {
     let result = Command::new("docker")
         .arg("ps")
         .arg("-f")
@@ -419,7 +512,10 @@ fn container_exists(name: &String) -> bool {
         .arg("--format")
         .arg("'{{.Names}}'")
         .output()
-        .expect("Failed to execute process: docker");
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker ps -f name={}", name),
+            reason: e.to_string()
+        })?;
 
     let output = String::from_utf8_lossy(&result.stdout)
         .to_string()
@@ -427,29 +523,28 @@ fn container_exists(name: &String) -> bool {
         .to_string()
         .replace("'", "");
 
-    return &output == name;
+    Ok(&output == name)
 }
 
-fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, workdir_path: &String, build_args: &Vec<String>) -> bool {
-    let dockerfile_path_str = dockerfile_path.to_str().unwrap();
+fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, workdir_path: &String, build_args: &Vec<String>) -> Result<bool, Error> {
+    let dockerfile_path_str = dockerfile_path.to_str()
+        .ok_or_else(|| Error::PathError("Dockerfile path contains invalid UTF-8".to_string()))?;
 
     println!("Building image: {}/{} -> {}", dockerfile_path_str, dockerfile, image);
 
-    let mut docker_args :Vec<&str> = vec![
-            "build"
-    ];
+    let mut docker_args: Vec<&str> = vec!["build"];
 
     let uid = get_current_uid();
     let result = get_user_by_uid(uid);
-    let username:String = match result {
+    let username: String = match result {
         None => "dev".to_string(),
-        Some(user) => user.name().to_str().unwrap().to_owned()
+        Some(user) => user.name().to_str().unwrap_or("dev").to_owned()
     };
 
     let uid_str = format!("uid={}", uid);
     let gid_str = format!("gid={}", get_current_gid());
     let username_str = format!("username={}", username.as_str());
-    let workdir_path_str = format!("workdir_path={}", workdir_path);
+    let workdir_path_str_arg = format!("workdir_path={}", workdir_path);
 
     docker_args.push("--build-arg");
     docker_args.push(&uid_str);
@@ -458,11 +553,10 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, w
     docker_args.push("--build-arg");
     docker_args.push(&username_str);
     docker_args.push("--build-arg");
-    docker_args.push(&workdir_path_str);
+    docker_args.push(&workdir_path_str_arg);
 
-    if build_args.len() > 0 {
-        for i in 0..build_args.len() {
-            let item = &build_args[i];
+    if !build_args.is_empty() {
+        for item in build_args {
             docker_args.push("--build-arg");
             docker_args.push(item.trim());
         }
@@ -480,53 +574,69 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, w
         .current_dir(dockerfile_path_str)
         .args(docker_args)
         .status()
-        .expect("failed to execute process 'docker pull IMAGE'");
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker build -t {} -f {}", image, dockerfile),
+            reason: e.to_string()
+        })?;
 
-        status.success()
+    Ok(status.success())
 }
 
 fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result<bool, Error> {
-    let current_path = std::env::current_dir().unwrap();
+    let current_path = std::env::current_dir()
+        .map_err(|e| Error::PathError(format!("Failed to get current directory: {}", e)))?;
     let path_clone = current_path.clone();
 
-    if  let Some(c) = load_config(path_clone, command) {
-        println!("{} {}/.contain.yaml", format!("(configuration)").blue().bold(), c.root_path.to_str().unwrap());
+    let c = load_config(path_clone, command)?;
 
-        let current_path = current_path.as_path().strip_prefix(c.root_path.to_str().unwrap()).unwrap();
-        let current_path_str = current_path.to_str().unwrap();
-        let absolute_current_path = format!("{}/{}", c.workdir_path, current_path_str);
-        let absolute_current_path_str = absolute_current_path.as_str();
+    let root_path_str = c.root_path.to_str()
+        .ok_or_else(|| Error::PathError("Root path contains invalid UTF-8".to_string()))?;
 
+    println!("{} {}/.contain.yaml", "(configuration)".blue().bold(), root_path_str);
+
+    let relative_path = current_path.as_path().strip_prefix(root_path_str)
+        .map_err(|_| Error::PathError(format!(
+            "Current directory '{}' is not under root path '{}'",
+            current_path.display(), root_path_str
+        )))?;
+    let relative_path_str = relative_path.to_str()
+        .ok_or_else(|| Error::PathError("Relative path contains invalid UTF-8".to_string()))?;
+    let absolute_current_path = format!("{}/{}", c.workdir_path, relative_path_str);
+    let absolute_current_path_str = absolute_current_path.as_str();
+
+    // Skip image checks for dry run mode
+    if !options.dry_run {
         // Check if image exists locally
-        if ! image_exists(&c.image) {
+        if !image_exists(&c.image)? {
             // Try downloading it
-            if ! download_image(&c.image) {
+            if !download_image(&c.image)? {
                 // Otherwise, build it
-                if ! build_image(&c.image, &c.dockerfile, &c.root_path, &c.workdir_path, &c.build_args) {
-                    panic!("Unable to build docker image: {} with dockerfile: {}/{}", c.image, c.root_path.to_str().unwrap(), c.dockerfile);
+                if !build_image(&c.image, &c.dockerfile, &c.root_path, &c.workdir_path, &c.build_args)? {
+                    return Err(Error::ImageBuildFailed {
+                        image: c.image.clone(),
+                        dockerfile: format!("{}/{}", root_path_str, c.dockerfile)
+                    });
                 }
             }
         }
-
-        println!("{} {}", format!("(using image)  ").blue().bold(), c.image);
-
-        if let Some(n) = c.name.clone() {
-            if container_exists(&n) {
-                println!("{} {}", format!("(executing inside existing container)  ").blue().bold(), &n);
-                docker_exec(absolute_current_path_str, c, options, n.as_str(), command, args);
-                return Ok(true);
-            }else{
-              docker_run(absolute_current_path_str, c, options, command, args);
-            }
-        }else{
-            docker_run(absolute_current_path_str, c, options, command, args);
-        }
-
-    }else{
-        return Err(Error::DockerError(format!("No docker image found for '{}' in .contain.yaml or any path above!", command).red()));
     }
 
-    return Ok(true);
+    println!("{} {}", "(using image)  ".blue().bold(), c.image);
+
+    if let Some(n) = c.name.clone() {
+        // Skip container existence check for dry run
+        if !options.dry_run && container_exists(&n)? {
+            println!("{} {}", "(executing inside existing container)  ".blue().bold(), &n);
+            docker_exec(absolute_current_path_str, c, options, n.as_str(), command, args);
+            return Ok(true);
+        } else {
+            docker_run(absolute_current_path_str, c, options, command, args);
+        }
+    } else {
+        docker_run(absolute_current_path_str, c, options, command, args);
+    }
+
+    Ok(true)
 }
 
 fn docker_run(current_dir: &str, c: Configuration, options: GlobalOptions, command: &str, args: Vec<&str>) {

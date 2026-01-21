@@ -1,0 +1,4 @@
+images:
+  - image: "test-image:latest"
+    dockerfile: Dockerfile
+    commands: any
