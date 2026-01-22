@@ -39,6 +39,18 @@ quick_error! {
         ImageBuildFailed { image: String, dockerfile: String } {
             display("Unable to build docker image '{}' from dockerfile '{}'", image, dockerfile)
         }
+        NameRequired { command: String } {
+            display("The '{}' command requires a named container. Add 'name:' to your .contain.yaml", command)
+        }
+        ContainerAlreadyRunning { name: String } {
+            display("Container '{}' is already running. Use 'contain down' first, or use 'contain run' to execute commands inside it.", name)
+        }
+        ContainerStopFailed { name: String, reason: String } {
+            display("Failed to stop container '{}': {}", name, reason)
+        }
+        ContainerRemoveFailed { name: String, reason: String } {
+            display("Failed to remove container '{}': {}", name, reason)
+        }
     }
 }
 
@@ -48,7 +60,6 @@ const DEFAULT_SHELL: &str = "/bin/bash";
 #[derive(Debug)]
 struct GlobalOptions {
     interactive: bool,
-    persist_image: bool,
     keep_container: bool,
     run_as_root: bool,
     dry_run: bool,
@@ -213,11 +224,6 @@ fn run() -> Result<bool, Error> {
         .author("Jonathan Pettersson")
         .about("Runs your development tools inside containers")
         // Global flags
-        .arg(Arg::with_name("persist")
-            .short("p")
-            .long("persist")
-            .help("Persist image changes")
-            .global(true))
         .arg(Arg::with_name("keep")
             .short("k")
             .long("keep")
@@ -266,12 +272,20 @@ fn run() -> Result<bool, Error> {
         // shell subcommand
         .subcommand(SubCommand::with_name("shell")
             .about("Open interactive shell (uses default_shell from config or /bin/bash)"))
+        // up subcommand
+        .subcommand(SubCommand::with_name("up")
+            .about("Start the container in the background and keep it running"))
+        // down subcommand
+        .subcommand(SubCommand::with_name("down")
+            .about("Stop and remove the background container"))
+        // status subcommand
+        .subcommand(SubCommand::with_name("status")
+            .about("Show the status of the background container"))
         .get_matches();
 
     // Extract global options
     let mut options = GlobalOptions {
         interactive: false,
-        persist_image: matches.is_present("persist"),
         keep_container: matches.is_present("keep"),
         dry_run: matches.is_present("dry"),
         run_as_root: matches.is_present("root"),
@@ -338,6 +352,15 @@ fn run() -> Result<bool, Error> {
             }
 
             run_command(shell, vec![], options)
+        }
+        ("up", Some(_sub_matches)) => {
+            container_up(options)
+        }
+        ("down", Some(_sub_matches)) => {
+            container_down(options)
+        }
+        ("status", Some(_sub_matches)) => {
+            container_status(options)
         }
         _ => unreachable!()
     }
@@ -673,6 +696,393 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, w
     Ok(status.success())
 }
 
+fn require_named_config(command_name: &str) -> Result<(Configuration, String), Error> {
+    let current_path = std::env::current_dir()
+        .map_err(|e| Error::PathError(format!("Failed to get current directory: {}", e)))?;
+
+    // Load config using "any" matcher since up/down/status don't run a specific command
+    let config = load_config(current_path, "any")?;
+
+    match config.name.clone() {
+        Some(name) => Ok((config, name)),
+        None => Err(Error::NameRequired { command: command_name.to_string() })
+    }
+}
+
+fn container_is_stopped(name: &str) -> Result<bool, Error> {
+    let result = Command::new("docker")
+        .arg("ps")
+        .arg("-a")
+        .arg("-f")
+        .arg(format!("name=^{}$", name))
+        .arg("--format")
+        .arg("{{.Status}}")
+        .output()
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker ps -a -f name={}", name),
+            reason: e.to_string()
+        })?;
+
+    let output = String::from_utf8_lossy(&result.stdout)
+        .to_string()
+        .trim()
+        .to_string();
+
+    // Container exists but is not running if status starts with "Exited"
+    Ok(!output.is_empty() && output.starts_with("Exited"))
+}
+
+struct ContainerInfo {
+    name: String,
+    status: String,
+    running: bool,
+    image: String,
+    created: String,
+    ports: String,
+}
+
+fn get_container_info(name: &str) -> Result<Option<ContainerInfo>, Error> {
+    let result = Command::new("docker")
+        .arg("ps")
+        .arg("-a")
+        .arg("-f")
+        .arg(format!("name=^{}$", name))
+        .arg("--format")
+        .arg("{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.CreatedAt}}\t{{.Ports}}")
+        .output()
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker ps -a -f name={}", name),
+            reason: e.to_string()
+        })?;
+
+    let output = String::from_utf8_lossy(&result.stdout)
+        .to_string()
+        .trim()
+        .to_string();
+
+    if output.is_empty() {
+        return Ok(None);
+    }
+
+    let parts: Vec<&str> = output.split('\t').collect();
+    if parts.len() >= 4 {
+        Ok(Some(ContainerInfo {
+            name: parts[0].to_string(),
+            status: parts[1].to_string(),
+            running: parts[1].starts_with("Up"),
+            image: parts[2].to_string(),
+            created: parts[3].to_string(),
+            ports: if parts.len() >= 5 { parts[4].to_string() } else { String::new() },
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+fn container_up(options: GlobalOptions) -> Result<bool, Error> {
+    let (config, name) = require_named_config("up")?;
+
+    let root_path_str = config.root_path.to_str()
+        .ok_or_else(|| Error::PathError("Root path contains invalid UTF-8".to_string()))?;
+
+    println!("{} {}/.contain.yaml", "(configuration)".blue().bold(), root_path_str);
+
+    // Check for passthrough mode
+    if is_inside_container() {
+        return Err(Error::UnsupportedParameters("'contain up' cannot run inside a container".to_string()));
+    }
+
+    // Check if container already exists and is running
+    if !options.dry_run && container_exists(&name)? {
+        return Err(Error::ContainerAlreadyRunning { name: name.clone() });
+    }
+
+    // Check if container exists but is stopped - if so, start it
+    if !options.dry_run && container_is_stopped(&name)? {
+        println!("{} Starting stopped container '{}'", "(starting)".green().bold(), &name);
+        return start_stopped_container(&name, &options);
+    }
+
+    // Ensure image exists
+    if !options.dry_run {
+        if !image_exists(&config.image)? {
+            if !download_image(&config.image)? {
+                if !build_image(&config.image, &config.dockerfile, &config.root_path, &config.workdir_path, &config.build_args)? {
+                    return Err(Error::ImageBuildFailed {
+                        image: config.image.clone(),
+                        dockerfile: format!("{}/{}", root_path_str, config.dockerfile)
+                    });
+                }
+            }
+        }
+    }
+
+    println!("{} {}", "(using image)  ".blue().bold(), config.image);
+
+    // Start container in detached mode
+    docker_run_detached(&config, &name, &options)
+}
+
+fn docker_run_detached(c: &Configuration, name: &str, options: &GlobalOptions) -> Result<bool, Error> {
+    let uid = get_current_uid();
+    let gid = get_current_gid();
+    let uid_gid = format!("{}:{}", uid, gid);
+
+    let mount = format!("type=bind,src={},dst={}", c.root_path.to_str().unwrap(), c.workdir_path);
+
+    let mut docker_args: Vec<String> = vec!["run".to_string()];
+
+    // Always detached for 'up'
+    docker_args.push("-d".to_string());
+
+    // Always use the container name
+    docker_args.push("--name".to_string());
+    docker_args.push(name.to_string());
+
+    // User mapping (unless root flag)
+    if !options.run_as_root && !c.flags.contains(&"root".to_string()) {
+        docker_args.push("-u".to_string());
+        docker_args.push(uid_gid);
+    }
+
+    // Working directory
+    docker_args.push("-w".to_string());
+    docker_args.push(c.workdir_path.clone());
+
+    // Environment variables
+    let all_env_variables = [&c.env_variables[..], &options.cli_env_variables[..]].concat();
+    for item in &all_env_variables {
+        docker_args.push("-e".to_string());
+        docker_args.push(item.trim().to_string());
+    }
+
+    // Mount workspace
+    docker_args.push("--mount".to_string());
+    docker_args.push(mount);
+
+    // Extra mounts
+    for item in &c.extra_mounts {
+        docker_args.push("--mount".to_string());
+        docker_args.push(item.clone());
+    }
+
+    // Ports (unless skip_ports)
+    if !options.skip_ports {
+        for item in &c.ports {
+            docker_args.push("-p".to_string());
+            docker_args.push(item.clone());
+        }
+    }
+
+    // Privileged flag
+    if c.flags.contains(&"privileged".to_string()) {
+        docker_args.push("--privileged".to_string());
+    }
+
+    // Image
+    docker_args.push(c.image.clone());
+
+    // Idle command to keep container running
+    docker_args.push("sleep".to_string());
+    docker_args.push("infinity".to_string());
+
+    let args_refs: Vec<&str> = docker_args.iter().map(|s| s.as_str()).collect();
+
+    if options.dry_run {
+        println!("{} docker {}", "(dry run)      ".yellow().bold(), args_refs.join(" "));
+        return Ok(true);
+    }
+
+    println!("{} docker {}", "(executing)    ".bright_blue().bold(), args_refs.join(" "));
+
+    let status = Command::new("docker")
+        .args(&args_refs)
+        .status()
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker {}", args_refs.join(" ")),
+            reason: e.to_string()
+        })?;
+
+    if status.success() {
+        println!("{} Container '{}' is now running in the background", "(success)".green().bold(), name);
+        println!("{} Use 'contain run <command>' or 'contain shell' to execute commands", "(hint)      ".blue().bold());
+        println!("{} Use 'contain down' to stop and remove the container", "(hint)      ".blue().bold());
+        Ok(true)
+    } else {
+        Err(Error::DockerError(format!("Failed to start container '{}'", name)))
+    }
+}
+
+fn start_stopped_container(name: &str, options: &GlobalOptions) -> Result<bool, Error> {
+    let docker_args = vec!["start", name];
+
+    if options.dry_run {
+        println!("{} docker {}", "(dry run)      ".yellow().bold(), docker_args.join(" "));
+        return Ok(true);
+    }
+
+    println!("{} docker {}", "(executing)    ".bright_blue().bold(), docker_args.join(" "));
+
+    let status = Command::new("docker")
+        .args(&docker_args)
+        .status()
+        .map_err(|e| Error::CommandError {
+            cmd: format!("docker start {}", name),
+            reason: e.to_string()
+        })?;
+
+    if status.success() {
+        println!("{} Container '{}' is now running", "(success)".green().bold(), name);
+        println!("{} Use 'contain run <command>' or 'contain shell' to execute commands", "(hint)      ".blue().bold());
+        println!("{} Use 'contain down' to stop and remove the container", "(hint)      ".blue().bold());
+        Ok(true)
+    } else {
+        Err(Error::DockerError(format!("Failed to start container '{}'", name)))
+    }
+}
+
+fn container_down(options: GlobalOptions) -> Result<bool, Error> {
+    let (config, name) = require_named_config("down")?;
+
+    let root_path_str = config.root_path.to_str()
+        .ok_or_else(|| Error::PathError("Root path contains invalid UTF-8".to_string()))?;
+
+    println!("{} {}/.contain.yaml", "(configuration)".blue().bold(), root_path_str);
+
+    // Check for passthrough mode
+    if is_inside_container() {
+        return Err(Error::UnsupportedParameters("'contain down' cannot run inside a container".to_string()));
+    }
+
+    // Check if container is running or stopped
+    let is_running = !options.dry_run && container_exists(&name)?;
+    let is_stopped = !options.dry_run && !is_running && container_is_stopped(&name)?;
+
+    if !options.dry_run && !is_running && !is_stopped {
+        println!("{} Container '{}' does not exist", "(info)      ".blue().bold(), &name);
+        return Ok(true);
+    }
+
+    // Stop the container if running
+    if is_running || options.dry_run {
+        let stop_args = vec!["stop", name.as_str()];
+
+        if options.dry_run {
+            println!("{} docker {}", "(dry run)      ".yellow().bold(), stop_args.join(" "));
+        } else {
+            println!("{} Stopping container '{}'...", "(stopping)  ".yellow().bold(), &name);
+            println!("{} docker {}", "(executing)    ".bright_blue().bold(), stop_args.join(" "));
+
+            let status = Command::new("docker")
+                .args(&stop_args)
+                .status()
+                .map_err(|e| Error::ContainerStopFailed {
+                    name: name.clone(),
+                    reason: e.to_string()
+                })?;
+
+            if !status.success() {
+                return Err(Error::ContainerStopFailed {
+                    name: name.clone(),
+                    reason: "docker stop returned non-zero exit code".to_string()
+                });
+            }
+
+            println!("{} Container '{}' stopped", "(stopped)   ".green().bold(), &name);
+        }
+    }
+
+    // Remove the container
+    let rm_args = vec!["rm", name.as_str()];
+
+    if options.dry_run {
+        println!("{} docker {}", "(dry run)      ".yellow().bold(), rm_args.join(" "));
+    } else {
+        println!("{} Removing container '{}'...", "(removing)  ".yellow().bold(), &name);
+        println!("{} docker {}", "(executing)    ".bright_blue().bold(), rm_args.join(" "));
+
+        let status = Command::new("docker")
+            .args(&rm_args)
+            .status()
+            .map_err(|e| Error::ContainerRemoveFailed {
+                name: name.clone(),
+                reason: e.to_string()
+            })?;
+
+        if !status.success() {
+            return Err(Error::ContainerRemoveFailed {
+                name: name.clone(),
+                reason: "docker rm returned non-zero exit code".to_string()
+            });
+        }
+
+        println!("{} Container '{}' removed", "(removed)   ".green().bold(), &name);
+    }
+
+    Ok(true)
+}
+
+fn container_status(options: GlobalOptions) -> Result<bool, Error> {
+    let (config, name) = require_named_config("status")?;
+
+    let root_path_str = config.root_path.to_str()
+        .ok_or_else(|| Error::PathError("Root path contains invalid UTF-8".to_string()))?;
+
+    println!("{} {}/.contain.yaml", "(configuration)".blue().bold(), root_path_str);
+    println!();
+
+    // Check for passthrough mode
+    if is_inside_container() {
+        println!("{} Running inside container (passthrough mode)", "(status)    ".blue().bold());
+        return Ok(true);
+    }
+
+    if options.dry_run {
+        println!("{} docker ps -a -f name={} --format ...", "(dry run)      ".yellow().bold(), &name);
+        return Ok(true);
+    }
+
+    // Get container info
+    match get_container_info(&name)? {
+        Some(info) => {
+            println!("{}", "Container Status".bold());
+            println!("{}", "=".repeat(50));
+            println!("{:<15} {}", "Name:".bold(), info.name);
+            println!("{:<15} {}", "Image:".bold(), info.image);
+            println!("{:<15} {}",
+                "Status:".bold(),
+                if info.running {
+                    info.status.green().to_string()
+                } else {
+                    info.status.red().to_string()
+                });
+            println!("{:<15} {}", "Created:".bold(), info.created);
+            if !info.ports.is_empty() {
+                println!("{:<15} {}", "Ports:".bold(), info.ports);
+            }
+            println!();
+
+            if info.running {
+                println!("{} Use 'contain run <command>' or 'contain shell' to execute commands", "(hint)      ".blue().bold());
+                println!("{} Use 'contain down' to stop the container", "(hint)      ".blue().bold());
+            } else {
+                println!("{} Use 'contain up' to start the container", "(hint)      ".blue().bold());
+                println!("{} Use 'contain down' to remove the stopped container", "(hint)      ".blue().bold());
+            }
+        }
+        None => {
+            println!("{}", "Container Status".bold());
+            println!("{}", "=".repeat(50));
+            println!("{:<15} {}", "Name:".bold(), &name);
+            println!("{:<15} {}", "Status:".bold(), "Not created".yellow());
+            println!();
+            println!("{} Use 'contain up' to create and start the container", "(hint)      ".blue().bold());
+        }
+    }
+
+    Ok(true)
+}
+
 fn run_command(command: &str, args: Vec<&str>, options: GlobalOptions) -> Result<bool, Error> {
     let current_path = std::env::current_dir()
         .map_err(|e| Error::PathError(format!("Failed to get current directory: {}", e)))?;
@@ -866,10 +1276,7 @@ fn execute_command(options: GlobalOptions, command: &str, args: Vec<&str>) {
                                 // if options.keep_container {
                                 //     println!("{} {}", format!("(kept container)  ").green().bold(), "CONTAINER_ID");
                                 // }
-                                // if options.persist_image {
-                                //     println!("{} {}", format!("(persisted changes to)  ").green().bold(), "IMAGE_ID");
-                                // }
-                                
+
                                 match status.code() {
                                     Some(code) => exit(code),
                                     None       => exit(0)
