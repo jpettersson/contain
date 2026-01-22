@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use std::env;
 
-use clap::{Arg, App, AppSettings};
+use clap::{Arg, App, AppSettings, SubCommand};
 use colored::*;
 use quick_error::quick_error;
 use users::{get_user_by_uid, get_current_uid, get_current_gid};
@@ -42,9 +42,8 @@ quick_error! {
     }
 }
 
-const COMMAND: &str = "command";
-const ARGS: &str = "args";
 const CONTAIN_FILENAME: &str = ".contain.yaml";
+const DEFAULT_SHELL: &str = "/bin/bash";
 
 #[derive(Debug)]
 struct GlobalOptions {
@@ -59,36 +58,8 @@ struct GlobalOptions {
 }
 
 impl GlobalOptions {
-    fn persist_image(&mut self, a: bool) {
-        self.persist_image = a;
-    }
-
-    fn keep_container(&mut self, a: bool) {
-        self.keep_container = a;
-    }
-
-    fn dry_run(&mut self, a: bool) {
-        self.dry_run = a;
-    }
-
     fn interactive(&mut self, a: bool) {
         self.interactive = a;
-    }
-
-    fn run_as_root(&mut self, a: bool) {
-        self.run_as_root = a;
-    }
-
-    fn skip_ports(&mut self, a: bool) {
-        self.skip_ports = a;
-    }
-
-    fn skip_name(&mut self, a: bool) {
-        self.skip_name = a;
-    }
-
-    fn add_env_variable(&mut self, a: String) {
-        self.cli_env_variables.push(a);
     }
 }
 
@@ -163,7 +134,8 @@ struct Configuration {
     env_variables: Vec<String>,
     build_args: Vec<String>,
     extra_mounts: Vec<String>,
-    ports: Vec<String>
+    ports: Vec<String>,
+    default_shell: Option<String>,
 }
 
 fn get_required_string(table: &HashMap<String, config::Value>, field: &str, file: &str) -> Result<String, Error> {
@@ -234,87 +206,140 @@ fn main() {
 }
 
 fn run() -> Result<bool, Error> {
-
-    let mut options = GlobalOptions {
-        interactive: false,
-        persist_image: false,
-        keep_container: false,
-        dry_run: false,
-        run_as_root: false,
-        skip_ports: false,
-        skip_name: false,
-        cli_env_variables: vec![]
-    };
-
     let matches = App::new("contain")
-        .setting(AppSettings::TrailingVarArg)
-        .setting(AppSettings::AllowLeadingHyphen)
-        .setting(AppSettings::ArgRequiredElseHelp)
+        .setting(AppSettings::SubcommandRequiredElseHelp)
         .setting(AppSettings::DisableVersion)
         .version(env!("CARGO_PKG_VERSION"))
         .author("Jonathan Pettersson")
         .about("Runs your development tools inside containers")
-            .arg(Arg::with_name(COMMAND)
-                .help("the command you want to run inside a container")
-                .takes_value(true)
-                .required(true))
-            .arg(Arg::with_name("args")
-                 .multiple(true))
-            .get_matches();
+        // Global flags
+        .arg(Arg::with_name("persist")
+            .short("p")
+            .long("persist")
+            .help("Persist image changes")
+            .global(true))
+        .arg(Arg::with_name("keep")
+            .short("k")
+            .long("keep")
+            .help("Keep container after execution")
+            .global(true))
+        .arg(Arg::with_name("dry")
+            .long("dry")
+            .help("Dry run")
+            .global(true))
+        .arg(Arg::with_name("root")
+            .long("root")
+            .help("Run as root")
+            .global(true))
+        .arg(Arg::with_name("skip_ports")
+            .long("skip-ports")
+            .help("Skip port mappings")
+            .global(true))
+        .arg(Arg::with_name("skip_name")
+            .long("skip-name")
+            .help("Skip container name")
+            .global(true))
+        .arg(Arg::with_name("env")
+            .short("e")
+            .help("Set environment variable (-eVAR=value)")
+            .takes_value(true)
+            .multiple(true)
+            .number_of_values(1)
+            .global(true))
+        // run subcommand
+        .subcommand(SubCommand::with_name("run")
+            .about("Run a command in the container (use 'contain run --help' for help)")
+            .setting(AppSettings::TrailingVarArg)
+            .setting(AppSettings::AllowLeadingHyphen)
+            .setting(AppSettings::DisableHelpFlags)
+            .arg(Arg::with_name("interactive")
+                .short("i")
+                .long("interactive")
+                .help("Keep STDIN open"))
+            .arg(Arg::with_name("help")
+                .long("help")
+                .help("Prints help information"))
+            .arg(Arg::with_name("command")
+                .help("Command and arguments to run")
+                .required_unless("help")
+                .multiple(true)))
+        // shell subcommand
+        .subcommand(SubCommand::with_name("shell")
+            .about("Open interactive shell (uses default_shell from config or /bin/bash)"))
+        .get_matches();
 
-    if matches.is_present(COMMAND) {
-        let command = matches.value_of(COMMAND).unwrap();
-        if matches.is_present(ARGS) {
-            let args: Vec<&str> = matches.values_of(ARGS).unwrap().collect();
-            let mut num_program_flags = 0;
+    // Extract global options
+    let mut options = GlobalOptions {
+        interactive: false,
+        persist_image: matches.is_present("persist"),
+        keep_container: matches.is_present("keep"),
+        dry_run: matches.is_present("dry"),
+        run_as_root: matches.is_present("root"),
+        skip_ports: matches.is_present("skip_ports"),
+        skip_name: matches.is_present("skip_name"),
+        cli_env_variables: matches.values_of("env")
+            .map(|v| v.map(String::from).collect())
+            .unwrap_or_default(),
+    };
 
-            let mut flag = command;
-            while flag.as_bytes()[0] == b'-' {
-                match flag {
-                    "-p" => options.persist_image(true),
-                    "-k" => options.keep_container(true),
-                    "-i" => options.interactive(true),
-                    "--dry" => options.dry_run(true),
-                    "--root" => options.run_as_root(true),
-                    "--skip-ports" => options.skip_ports(true),
-                    "--skip-name" => options.skip_name(true),
-                    x if x.as_bytes()[1] == b'e' => {
-                        let slice = &x[2..];
-                        options.add_env_variable(slice.to_string())
-                        },
-                    _ => return Err(Error::UnsupportedParameters(format!("{}", flag)))
-                }
-                num_program_flags += 1;
-                flag = args[num_program_flags-1];
+    match matches.subcommand() {
+        ("run", Some(sub_matches)) => {
+            // Handle --help explicitly since we disabled automatic -h
+            if sub_matches.is_present("help") {
+                println!("contain-run");
+                println!("Run a command in the container");
+                println!();
+                println!("USAGE:");
+                println!("    contain run [FLAGS] [OPTIONS] <command>...");
+                println!();
+                println!("FLAGS:");
+                println!("    -i, --interactive    Keep STDIN open");
+                println!("        --help           Prints help information");
+                println!();
+                println!("ARGS:");
+                println!("    <command>...    Command and arguments to run");
+                println!();
+                println!("NOTE: Short -h is passed to the container. Use --help for this message.");
+                return Ok(true);
             }
 
-            // Determine actual command and args after flag parsing
-            let (actual_command, actual_args): (&str, Vec<&str>) = if num_program_flags > 0 {
-                let mut mut_args = args.clone();
-                (args[num_program_flags-1], mut_args.drain(num_program_flags..).collect())
-            } else {
-                (command, args)
-            };
+            let cmd_args: Vec<&str> = sub_matches.values_of("command").unwrap().collect();
+            let command = cmd_args[0];
+            let args: Vec<&str> = cmd_args[1..].to_vec();
+
+            if sub_matches.is_present("interactive") {
+                options.interactive(true);
+            }
 
             // Check for passthrough mode (running inside a container)
             if is_inside_container() {
-                passthrough_command(actual_command, actual_args, &options);
+                passthrough_command(command, args, &options);
             }
 
-            return run_command(actual_command, actual_args, options);
-
-        }else{
-            // No args case - check passthrough mode
-            if is_inside_container() {
-                passthrough_command(command, vec![], &options);
-            }
-            return run_command(command, vec![], options);
+            run_command(command, args, options)
         }
-    }else{
-        // This always happens because clap-rs triggers help if no command is passed..
-        // TODO: Get rid of this else branch.
+        ("shell", Some(_sub_matches)) => {
+            options.interactive(true);
 
-        return Ok(true);
+            // For shell, we need to load config first to get default_shell
+            // We use a placeholder command "shell" to find any matching config
+            let current_path = std::env::current_dir()
+                .map_err(|e| Error::PathError(format!("Failed to get current directory: {}", e)))?;
+
+            // Try to load config with "any" matcher or "shell" command
+            let config = load_config(current_path.clone(), "shell")
+                .or_else(|_| load_config(current_path, "any"))?;
+
+            let shell = config.default_shell.as_deref().unwrap_or(DEFAULT_SHELL);
+
+            // Check for passthrough mode (running inside a container)
+            if is_inside_container() {
+                passthrough_command(shell, vec![], &options);
+            }
+
+            run_command(shell, vec![], options)
+        }
+        _ => unreachable!()
     }
 }
 
@@ -386,6 +411,7 @@ fn load_config(mut path: PathBuf, command: &str) -> Result<Configuration, Error>
             let image = get_required_string(&command_entry, "image", &full_path)?;
             let name = get_optional_string(&command_entry, "name", &full_path)?;
             let dockerfile = get_required_string(&command_entry, "dockerfile", &full_path)?;
+            let default_shell = get_optional_string(&command_entry, "default_shell", &full_path)?;
 
             // Process var definitions (execute commands to set environment variables)
             if let Some(node) = command_entry.get("var") {
@@ -517,7 +543,8 @@ fn load_config(mut path: PathBuf, command: &str) -> Result<Configuration, Error>
                 env_variables,
                 build_args,
                 extra_mounts,
-                ports
+                ports,
+                default_shell,
             };
 
             return Ok(config_struct);

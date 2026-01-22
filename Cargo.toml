@@ -1,6 +1,6 @@
 [package]
 name = "contain"
-version = "0.3.2"
+version = "1.0.0"
 edition = "2024"
 authors = ["Jonathan Pettersson <jonathan.anders.pettersson@gmail.com>"]
 
