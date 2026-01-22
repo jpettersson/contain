@@ -682,7 +682,7 @@ fn build_image(image: &String, dockerfile: &String, dockerfile_path: &PathBuf, w
     docker_args.push(dockerfile);
     docker_args.push(dockerfile_path_str);
 
-    println!("{} docker {}", "(executing)    ".bright_blue().bold(), docker_args.join(" "));
+    println!("{} docker {}", "(executing)    ".bright_blue().bold(), format_docker_args(&docker_args));
 
     let status = Command::new("docker")
         .current_dir(dockerfile_path_str)
@@ -889,11 +889,11 @@ fn docker_run_detached(c: &Configuration, name: &str, options: &GlobalOptions) -
     let args_refs: Vec<&str> = docker_args.iter().map(|s| s.as_str()).collect();
 
     if options.dry_run {
-        println!("{} docker {}", "(dry run)      ".yellow().bold(), args_refs.join(" "));
+        println!("{} docker {}", "(dry run)      ".yellow().bold(), format_docker_args(&args_refs));
         return Ok(true);
     }
 
-    println!("{} docker {}", "(executing)    ".bright_blue().bold(), args_refs.join(" "));
+    println!("{} docker {}", "(executing)    ".bright_blue().bold(), format_docker_args(&args_refs));
 
     let status = Command::new("docker")
         .args(&args_refs)
@@ -917,11 +917,11 @@ fn start_stopped_container(name: &str, options: &GlobalOptions) -> Result<bool, 
     let docker_args = vec!["start", name];
 
     if options.dry_run {
-        println!("{} docker {}", "(dry run)      ".yellow().bold(), docker_args.join(" "));
+        println!("{} docker {}", "(dry run)      ".yellow().bold(), format_docker_args(&docker_args));
         return Ok(true);
     }
 
-    println!("{} docker {}", "(executing)    ".bright_blue().bold(), docker_args.join(" "));
+    println!("{} docker {}", "(executing)    ".bright_blue().bold(), format_docker_args(&docker_args));
 
     let status = Command::new("docker")
         .args(&docker_args)
@@ -968,10 +968,10 @@ fn container_down(options: GlobalOptions) -> Result<bool, Error> {
         let stop_args = vec!["stop", name.as_str()];
 
         if options.dry_run {
-            println!("{} docker {}", "(dry run)      ".yellow().bold(), stop_args.join(" "));
+            println!("{} docker {}", "(dry run)      ".yellow().bold(), format_docker_args(&stop_args));
         } else {
             println!("{} Stopping container '{}'...", "(stopping)  ".yellow().bold(), &name);
-            println!("{} docker {}", "(executing)    ".bright_blue().bold(), stop_args.join(" "));
+            println!("{} docker {}", "(executing)    ".bright_blue().bold(), format_docker_args(&stop_args));
 
             let status = Command::new("docker")
                 .args(&stop_args)
@@ -996,10 +996,10 @@ fn container_down(options: GlobalOptions) -> Result<bool, Error> {
     let rm_args = vec!["rm", name.as_str()];
 
     if options.dry_run {
-        println!("{} docker {}", "(dry run)      ".yellow().bold(), rm_args.join(" "));
+        println!("{} docker {}", "(dry run)      ".yellow().bold(), format_docker_args(&rm_args));
     } else {
         println!("{} Removing container '{}'...", "(removing)  ".yellow().bold(), &name);
-        println!("{} docker {}", "(executing)    ".bright_blue().bold(), rm_args.join(" "));
+        println!("{} docker {}", "(executing)    ".bright_blue().bold(), format_docker_args(&rm_args));
 
         let status = Command::new("docker")
             .args(&rm_args)
@@ -1264,9 +1264,62 @@ fn docker_exec(current_dir: &str, c: Configuration, options: GlobalOptions, name
     return execute_command(options, "docker", docker_args);
 }
 
+/// Formats docker arguments into a multi-line string for readable output.
+/// Groups flags with their values and puts each on a separate line with backslash continuation.
+fn format_docker_args(args: &[&str]) -> String {
+    if args.is_empty() {
+        return String::new();
+    }
+
+    // Flags that take a value as the next argument
+    let value_flags: &[&str] = &[
+        "-e", "-p", "-u", "-w", "-t", "-f",
+        "--name", "--mount", "--build-arg", "--format",
+    ];
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = args[i];
+
+        // Check if this is a flag that takes a value
+        if value_flags.contains(&arg) && i + 1 < args.len() {
+            lines.push(format!("{} {}", arg, args[i + 1]));
+            i += 2;
+        } else {
+            lines.push(arg.to_string());
+            i += 1;
+        }
+    }
+
+    if lines.len() <= 1 {
+        return lines.join(" ");
+    }
+
+    // Format with backslash continuations
+    let indent = "                  "; // Aligns with "(executing)     docker "
+    let mut result = String::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if idx == 0 {
+            result.push_str(line);
+        } else {
+            result.push_str(&format!("\n{}{}", indent, line));
+        }
+
+        // Add backslash continuation except for the last line
+        if idx < lines.len() - 1 {
+            result.push_str(" \\");
+        }
+    }
+
+    result
+}
+
 fn execute_command(options: GlobalOptions, command: &str, args: Vec<&str>) {
     if ! options.dry_run {
-        println!("{} {} {}", "(executing)    ".bright_blue().bold(), command, args.join(" "));
+        println!("{} {} {}", "(executing)    ".bright_blue().bold(), command, format_docker_args(&args));
         match Command::new(command)
                        .args(args)
                        .spawn()
@@ -1285,6 +1338,6 @@ fn execute_command(options: GlobalOptions, command: &str, args: Vec<&str>) {
                             Err(err) => println!("ERROR {:?}", err)
                         }
     } else {
-        println!("{} {} {}", "(dry run)      ".yellow().bold(), command, args.join(" "));
+        println!("{} {} {}", "(dry run)      ".yellow().bold(), command, format_docker_args(&args));
     }
 }
