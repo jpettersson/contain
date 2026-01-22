@@ -2,7 +2,7 @@ use std::process::Command;
 use std::fs::canonicalize;
 use std::path::Path;
 
-static WITHOUT_ARGS_OUTPUT: &'static str = "contain 0.3.1
+static WITHOUT_ARGS_OUTPUT: &'static str = "contain 0.3.2
 Jonathan Pettersson
 Runs your development tools inside containers
 

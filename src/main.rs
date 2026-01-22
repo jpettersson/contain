@@ -102,6 +102,65 @@ impl GlobalOptions {
     }
 }
 
+/// Detects if contain is running inside a container.
+///
+/// Detection priority:
+/// 1. CONTAIN_PASSTHROUGH env var (explicit override)
+/// 2. /.dockerenv file (Docker)
+/// 3. /run/.containerenv file (Podman)
+fn is_inside_container() -> bool {
+    // Allow explicit override via environment variable
+    if let Ok(val) = std::env::var("CONTAIN_PASSTHROUGH") {
+        match val.to_lowercase().as_str() {
+            "1" | "true" | "yes" => return true,
+            "0" | "false" | "no" => return false,
+            _ => {} // Fall through to auto-detection
+        }
+    }
+
+    // Check for Docker container marker
+    if std::path::Path::new("/.dockerenv").exists() {
+        return true;
+    }
+
+    // Check for Podman container marker
+    if std::path::Path::new("/run/.containerenv").exists() {
+        return true;
+    }
+
+    false
+}
+
+/// Execute command directly in passthrough mode (when inside a container).
+/// Preserves -e environment variables, strips all other contain flags.
+#[cfg(unix)]
+fn passthrough_command(command: &str, args: Vec<&str>, options: &GlobalOptions) -> ! {
+    use std::os::unix::process::CommandExt;
+
+    // Set environment variables from -e flags
+    for env_var in &options.cli_env_variables {
+        if let Some(pos) = env_var.find('=') {
+            let key = &env_var[..pos];
+            let value = &env_var[pos + 1..];
+            std::env::set_var(key, value);
+        }
+    }
+
+    // Optional: show passthrough indicator (controlled by env var)
+    if std::env::var("CONTAIN_VERBOSE").is_ok() {
+        eprintln!("{} passthrough: {} {}", "(contain)".blue().bold(), command, args.join(" "));
+    }
+
+    // Build the command and use exec to replace the current process
+    let err = Command::new(command)
+        .args(&args)
+        .exec();
+
+    // exec() only returns if there was an error
+    eprintln!("contain: failed to execute '{}': {}", command, err);
+    std::process::exit(127)
+}
+
 #[derive(Debug)]
 struct Configuration {
     image: String,
@@ -238,14 +297,26 @@ fn run() -> Result<bool, Error> {
                 flag = args[num_program_flags-1];
             }
 
-            if num_program_flags > 0 {
+            // Determine actual command and args after flag parsing
+            let (actual_command, actual_args): (&str, Vec<&str>) = if num_program_flags > 0 {
                 let mut mut_args = args.clone();
-                return run_command(args[num_program_flags-1], mut_args.drain(num_program_flags..).collect(), options);
-            }else{
-                return run_command(command, args, options);
+                (args[num_program_flags-1], mut_args.drain(num_program_flags..).collect())
+            } else {
+                (command, args)
+            };
+
+            // Check for passthrough mode (running inside a container)
+            if is_inside_container() {
+                passthrough_command(actual_command, actual_args, &options);
             }
 
+            return run_command(actual_command, actual_args, options);
+
         }else{
+            // No args case - check passthrough mode
+            if is_inside_container() {
+                passthrough_command(command, vec![], &options);
+            }
             return run_command(command, vec![], options);
         }
     }else{
