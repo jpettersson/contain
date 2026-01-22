@@ -34,16 +34,75 @@ Benefits of contain:
 
 ### Installation
 
-### Arch Linux package
+#### Arch Linux
 
-[contain](https://aur.archlinux.org/packages/contain/)
+Available on the AUR: [contain](https://aur.archlinux.org/packages/contain/)
 
-#### Build with cargo
+#### From source
 
-You can build the binary from scratch easily with cargo. Place the binary in a dir that's included in your `$PATH`.
+Requires Rust 1.85+ (edition 2024).
 
+```bash
+# Clone and install
+git clone <repo-url>
+cd contain
+cargo install --path .
 ```
-cargo build --release --frozen --all-targets
+
+This installs the binary to `~/.cargo/bin/`. Make sure this directory is in your `$PATH`.
+
+### Development
+
+#### Prerequisites
+
+- Rust 1.85+ (for edition 2024 support)
+- Docker (for running containerized commands)
+
+#### Building
+
+```bash
+# Debug build
+cargo build
+
+# Release build (optimized)
+cargo build --release
+```
+
+The binary will be at `target/debug/contain` or `target/release/contain`.
+
+#### Running locally
+
+```bash
+# Run directly
+cargo run -- <command> [args]
+
+# Or use the built binary
+./target/debug/contain <command> [args]
+
+# Example: dry run to see the generated Docker command
+./target/debug/contain --dry echo hello
+```
+
+#### Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run tests with output
+cargo test -- --nocapture
+```
+
+Note: Some integration tests require Docker. If running inside a container, set `CONTAIN_PASSTHROUGH=0` to disable passthrough mode during testing.
+
+#### Installing locally
+
+```bash
+# Install to ~/.cargo/bin/
+cargo install --path .
+
+# Reinstall after changes
+cargo install --path . --force
 ```
 
 ### Collaboration

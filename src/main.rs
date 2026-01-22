@@ -1,14 +1,3 @@
-extern crate config;
-extern crate colored;
-extern crate users;
-extern crate shellexpand;
-extern crate semver;
-
-#[macro_use] extern crate clap;
-
-#[macro_use]
-extern crate quick_error;
-
 use std::process::{Command, Stdio, exit};
 use std::path::PathBuf;
 use std::collections::HashMap;
@@ -16,6 +5,7 @@ use std::env;
 
 use clap::{Arg, App, AppSettings};
 use colored::*;
+use quick_error::quick_error;
 use users::{get_user_by_uid, get_current_uid, get_current_gid};
 use semver::Version;
 
@@ -142,7 +132,8 @@ fn passthrough_command(command: &str, args: Vec<&str>, options: &GlobalOptions) 
         if let Some(pos) = env_var.find('=') {
             let key = &env_var[..pos];
             let value = &env_var[pos + 1..];
-            std::env::set_var(key, value);
+            // SAFETY: This is single-threaded CLI startup code
+            unsafe { std::env::set_var(key, value); }
         }
     }
 
@@ -182,7 +173,7 @@ fn get_required_string(table: &HashMap<String, config::Value>, field: &str, file
             field: field.to_string()
         })?
         .clone()
-        .into_str()
+        .into_string()
         .map_err(|_| Error::ConfigInvalidValue {
             file: file.to_string(),
             field: field.to_string(),
@@ -194,7 +185,7 @@ fn get_optional_string(table: &HashMap<String, config::Value>, field: &str, file
     match table.get(field) {
         None => Ok(None),
         Some(v) => v.clone()
-            .into_str()
+            .into_string()
             .map(Some)
             .map_err(|_| Error::ConfigInvalidValue {
                 file: file.to_string(),
@@ -216,8 +207,8 @@ fn get_string_array(table: &HashMap<String, config::Value>, field: &str, file: &
                     reason: "expected an array".to_string()
                 })?;
             vec.into_iter()
-                .map(|value| {
-                    let s = value.into_str().map_err(|_| Error::ConfigInvalidValue {
+                .map(|value: config::Value| {
+                    let s = value.into_string().map_err(|_| Error::ConfigInvalidValue {
                         file: file.to_string(),
                         field: field.to_string(),
                         reason: "expected array of strings".to_string()
@@ -260,7 +251,7 @@ fn run() -> Result<bool, Error> {
         .setting(AppSettings::AllowLeadingHyphen)
         .setting(AppSettings::ArgRequiredElseHelp)
         .setting(AppSettings::DisableVersion)
-        .version(crate_version!())
+        .version(env!("CARGO_PKG_VERSION"))
         .author("Jonathan Pettersson")
         .about("Runs your development tools inside containers")
             .arg(Arg::with_name(COMMAND)
@@ -342,14 +333,14 @@ fn get_config_table(config: &config::Config, command: &str) -> Option<HashMap<St
         };
 
         // Check if commands is a single string
-        if let Ok(string) = commands_value.clone().into_str() {
+        if let Ok(string) = commands_value.clone().into_string() {
             if string == command || string == "any" {
                 return Some(table.clone())
             }
         // Check if commands is an array of strings
         } else if let Ok(entries) = commands_value.into_array() {
             for entry in &entries {
-                if let Ok(entry_string) = entry.clone().into_str() {
+                if let Ok(entry_string) = entry.clone().into_string() {
                     if entry_string == command || entry_string == "any" {
                         return Some(table.clone())
                     }
@@ -368,23 +359,24 @@ fn load_config(mut path: PathBuf, command: &str) -> Result<Configuration, Error>
         .to_str()
         .ok_or_else(|| Error::PathError("Path contains invalid UTF-8".to_string()))?;
 
-    env::set_var("CONTAIN_ROOT_PATH", path_str);
+    // SAFETY: This is single-threaded CLI startup code
+    unsafe { env::set_var("CONTAIN_ROOT_PATH", path_str); }
 
     let full_path = format!("{}/{}", path_str, CONTAIN_FILENAME);
-    let mut pending_config = config::Config::default();
 
-    let result = pending_config
-        .merge(config::File::with_name(&full_path));
+    let result = config::Config::builder()
+        .add_source(config::File::with_name(&full_path))
+        .build();
 
     if let Ok(ref config) = result {
 
         let min_version: Option<String> = config.get("contain_min_version").ok();
 
         if let Some(v) = min_version {
-            if Version::parse(crate_version!()) < Version::parse(&v) {
+            if Version::parse(env!("CARGO_PKG_VERSION")) < Version::parse(&v) {
                 return Err(Error::ConfigError(format!(
                     "{} requires contain version >= {} (current version: {})",
-                    full_path, v, crate_version!()
+                    full_path, v, env!("CARGO_PKG_VERSION")
                 )));
             }
         };
@@ -434,7 +426,8 @@ fn load_config(mut path: PathBuf, command: &str) -> Result<Configuration, Error>
                                 .trim()
                                 .to_string();
 
-                            env::set_var(var_name_string, output);
+                            // SAFETY: This is single-threaded CLI startup code
+                            unsafe { env::set_var(var_name_string, output); }
                         }
                     }
                 }

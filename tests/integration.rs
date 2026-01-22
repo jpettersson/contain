@@ -27,11 +27,7 @@ static ERROR_NO_CONFIG_FILE_FOUND: &'static str = "No docker image found for 'ls
 
 #[cfg(test)]
 mod integration {
-    use Command;
-    use canonicalize;
-    use WITHOUT_ARGS_OUTPUT;
-    use LS_IN_EXAMPLES_MULTIPLE_CONTAINERS;
-    use ERROR_NO_CONFIG_FILE_FOUND;
+    use super::*;
 
     pub trait ReversableSubString { 
         fn take_from_end(self, len: usize) -> Self;
