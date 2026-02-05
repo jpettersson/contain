@@ -1,0 +1,7 @@
+images:
+  - image: "test-image:latest"
+    dockerfile: Dockerfile
+    commands: any
+    env:
+      - "MY_VAR=test_value"
+      - "ANOTHER_VAR=another_value"

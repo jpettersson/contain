@@ -1,0 +1,4 @@
+images:
+  - image: "alpine:latest"
+    dockerfile: Dockerfile.mvn
+    commands: any

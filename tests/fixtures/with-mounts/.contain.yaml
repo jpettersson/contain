@@ -1,0 +1,8 @@
+images:
+  - image: "test-image:latest"
+    dockerfile: Dockerfile
+    commands: any
+    mounts:
+      - type: bind
+        src: /tmp
+        dst: /container-tmp

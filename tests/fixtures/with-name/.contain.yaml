@@ -1,0 +1,5 @@
+images:
+  - image: "test-image:latest"
+    name: test-container
+    dockerfile: Dockerfile
+    commands: any
